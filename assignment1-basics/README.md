@@ -81,3 +81,10 @@ uv run pytest
 #### 下载数据 (Download data)
 
 下载 TinyStories 数据集以及 OpenWebText 的子样本。
+
+rm -rf .venv
+# 使用 Python 3.12（推荐，torch 2.6.0 支持）
+uv venv --python 3.12
+source .venv/bin/activate
+
+pytest tests/test_train_bpe.py -v
