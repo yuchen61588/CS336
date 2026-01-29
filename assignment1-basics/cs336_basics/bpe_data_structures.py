@@ -35,102 +35,130 @@ class WordObject:
                 采用从左到右的贪婪匹配策略。一旦匹配成功，跳过这两个 Token，
                 记录左右邻居关系的断裂。
         """
-        new_tokens = []
-        i = 0
-        n =len(self.tokens)
-        change_removed = defaultdict(int)
-        change_added = defaultdict(int)
-
-        while i<n:
-            # 检查：当前位置 i 和 i+1 是否正好构成了我们要合并的 pair
-            if i<n-1 and self.tokens[i] ==pair[0]and self.tokens[i+1]==pair[1]:
-                # 合并 记录左侧关系（如果有）(prev, pair[0])组合删去
-                if i>0:
-                    prev_token = self.tokens[i-1]
-                    change_removed[(prev_token,self.tokens[i])] += self.count
-                # 合并右侧 (pair[1], next)(如果下面两个是下一个将要合并得pair，那么这次循环就不能加入了，让下一次循环取)
-                if i<n-2:
-                    # 检查下一个位置是否也是合并点
-                    is_next_merge = (i + 2 < n - 1) and \
-                                    (self.tokens[i + 2] == pair[0] and self.tokens[i + 3] == pair[1])
-                    if not is_next_merge:
-                        next_token = self.tokens[i+2]
-                        change_removed[(self.tokens[i+1],next_token)] += self.count
-                # 处理添加：
-                # 将新id加入i性能关系，并且如果new_tokens不为空，要把新id与前面得id构成新连接
-                if new_tokens:
-                    change_added[(new_tokens[-1],new_token_id)]+=self.count
-                new_tokens.append(new_token_id)
-                # 跳过合并两个token
-                i+=2
-            else:
-                current_token = self.tokens[i]
-                # 处理添加 (Added) 如果前一个 token 是刚刚生成的"新 Token"，那么当前这个旧 Token 与它构成了新关系
-                if new_tokens:
-                    last_tokens = new_tokens[-1]
-                    if last_tokens == new_token_id:
-                        change_added[(last_tokens,current_token)] +=self.count
-                new_tokens.append(current_token)
-                i+=1
-
-        self.tokens = new_tokens
-        return change_added,change_removed
-        # 优化：不返回字典，返回简单的列表或直接计算 Delta
-        # 这里演示返回 list 以减少 dict 分配开销
-        # if len(self.tokens) < 2:
-        #     return [], []
-        #
         # new_tokens = []
         # i = 0
-        # n = len(self.tokens)
-        # target_p0, target_p1 = pair
-        #
-        # # 预先取出变量，减少属性访问
-        # tokens = self.tokens
-        # word_freq = self.count
-        #
-        # # 记录变化：(pair, delta_count)
-        # # 使用列表而非字典，后续统一汇总
-        # changes = []
-        #
-        # # 记录上一个追加到 new_tokens 的元素
-        # last_new_token = -1
-        # # 记录上一个处理完的旧片段的右边界
-        # last_old_right = -1
-        #
-        # while i < n:
-        #     # 检查是否匹配目标 Pair
-        #     if i < n - 1 and tokens[i] == target_p0 and tokens[i + 1] == target_p1:
-        #         current_token = new_token_id
-        #         current_old_left = target_p0
-        #         current_old_right = target_p1
-        #
-        #         # 自身被合并，记录减少 (pair, -count)
-        #         changes.append((pair, -word_freq))
-        #         step = 2
+        # n =len(self.tokens)
+        # change_removed = defaultdict(int)
+        # change_added = defaultdict(int)
+
+        # while i<n:
+        #     # 检查：当前位置 i 和 i+1 是否正好构成了我们要合并的 pair
+        #     if i<n-1 and self.tokens[i] ==pair[0]and self.tokens[i+1]==pair[1]:
+        #         # 合并 记录左侧关系（如果有）(prev, pair[0])组合删去
+        #         if i>0:
+        #             prev_token = self.tokens[i-1]
+        #             change_removed[(prev_token,self.tokens[i])] += self.count
+        #         # 合并右侧 (pair[1], next)(如果下面两个是下一个将要合并得pair，那么这次循环就不能加入了，让下一次循环取)
+        #         if i<n-2:
+        #             # 检查下一个位置是否也是合并点
+        #             is_next_merge = (i + 2 < n - 1) and \
+        #                             (self.tokens[i + 2] == pair[0] and self.tokens[i + 3] == pair[1])
+        #             if not is_next_merge:
+        #                 next_token = self.tokens[i+2]
+        #                 change_removed[(self.tokens[i+1],next_token)] += self.count
+        #         # 处理添加：
+        #         # 将新id加入i性能关系，并且如果new_tokens不为空，要把新id与前面得id构成新连接
+        #         if new_tokens:
+        #             change_added[(new_tokens[-1],new_token_id)]+=self.count
+        #         new_tokens.append(new_token_id)
+        #         # 跳过合并两个token
+        #         i+=2
         #     else:
-        #         current_token = tokens[i]
-        #         current_old_left = current_token
-        #         current_old_right = current_token
-        #         step = 1
-        #
-        #     # 核心优化：只检查"接缝"处的差异
-        #     if new_tokens:
-        #         # 新接缝: (last_new_token, current_token)
-        #         # 旧接缝: (last_old_right, current_old_left)
-        #         if (last_new_token != last_old_right) or (current_token != current_old_left):
-        #             # 旧关系断裂
-        #             changes.append(((last_old_right, current_old_left), -word_freq))
-        #             # 新关系产生
-        #             changes.append(((last_new_token, current_token), word_freq))
-        #
-        #     new_tokens.append(current_token)
-        #     last_new_token = current_token
-        #     last_old_right = current_old_right
-        #     i += step
-        #
+        #         current_token = self.tokens[i]
+        #         # 处理添加 (Added) 如果前一个 token 是刚刚生成的"新 Token"，那么当前这个旧 Token 与它构成了新关系
+        #         if new_tokens:
+        #             last_tokens = new_tokens[-1]
+        #             if last_tokens == new_token_id:
+        #                 change_added[(last_tokens,current_token)] +=self.count
+        #         new_tokens.append(current_token)
+        #         i+=1
+
         # self.tokens = new_tokens
-        # return changes
+        # return change_added,change_removed
+        #上面的实现直接导致内存爆掉，为了减少内存消耗，我们采用列表方法
+        
+        if len(self.tokens) < 2:
+            return {}, {}
+        tokens = self.tokens
+
+        freq_deltas = defaultdict(int) # 存储频率变化量: key=pair, value=delta
+
+        generated_tokens = []
+        i = 0
+        n = len(self.tokens)
+        target_left, target_right = pair #target的左边界与右边界
+        # 记录"上一个片段"在原序列中的右边界
+        # 初始为 None，因为第一个 token 左边没有 token
+        last_seg_right = None
+        while i < n:
+            # 检查是否匹配目标 pair
+            is_target = (i < n - 1 and tokens[i] == target_left and tokens[i+1] == target_right)
+            if is_target:
+                # --- 发生合并 ---
+                token_to_append = new_token_id
+                # 当前片段在原序列中的左边界是 pair 的左边
+                curr_seg_left = target_left
+                # 当前片段在原序列中的右边界是 pair 的右边
+                curr_seg_right = target_right
+                # 目标 pair 本身被消耗掉了，频率 -1
+                freq_deltas[pair] -= 1
+                step = 2
+            else:
+                # --- 不合并 ---
+                current_token = tokens[i]
+                token_to_append = current_token
+                # 原序列的左右边界都是它自己
+                curr_seg_left = current_token
+                curr_seg_right = current_token
+                step = 1
+            # 如果生成了新代码
+            if generated_tokens:
+                # 只有当接缝处发生变化时才更新频率
+                # 新连接 vs 旧连接
+                # 新连接: (last_token, token_to_append)
+                # 旧连接: (last_seg_right, curr_seg_left)
+                # 变化条件：(上一个token变了) 或 (当前token变了)
+                # 也就是 (last_token != last_seg_right) or (token_to_append != curr_seg_left)
+                # 注意：这里对比的是 token ID
+                last_token = generated_tokens[-1]
+                if (last_token != last_seg_right) or (token_to_append != curr_seg_left):
+                    # 新产生的连接
+                    added_pair = (last_token, token_to_append)
+                    freq_deltas[added_pair] += 1
+                    
+                    # 消失的旧连接
+                    removed_pair = (last_seg_right, curr_seg_left)
+                    freq_deltas[removed_pair] -= 1
+            
+            generated_tokens.append(token_to_append)
+            
+            # 更新 last_seg_right 供下一次循环使用
+            last_seg_right = curr_seg_right
+            i += step
+        # 更新内部 token 列表
+        word_count = self.count
+        self.tokens = generated_tokens
+        # 将 delta 分离为 added 和 removed 字典
+        removed_counts = {}
+        added_counts = {}
+        for p, delta in freq_deltas.items():
+            if delta < 0:
+                removed_counts[p] = -delta*word_count # 存正数，表示移除的次数
+            elif delta > 0:
+                added_counts[p] = delta*word_count
+
+        return  added_counts,removed_counts
+
+                
+
+
+
+
+
+
+
+
+
 
 
 class InvertedIndex:
