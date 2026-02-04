@@ -215,8 +215,8 @@ def train_bpe(
     for st in special_tokens:
         vocab[next_token_id] = st.encode('utf-8')
         next_token_id += 1
-    batch_removed = defaultdict(int)
-    batch_added = defaultdict(int)
+    # batch_removed = defaultdict(int)
+    # batch_added = defaultdict(int)
     # --- 第三阶段：训练主循环 ---
     # (使用 O(1) 查找 + 懒惰更新 + 局部 diff 计算)
     with tqdm.tqdm(total=target_merges, desc="BPE Training") as pbar:
@@ -239,8 +239,8 @@ def train_bpe(
             affected_word_ids = inverted_index.get_word_ids(best_pair)
 
             # 批量更新
-            batch_removed.clear()
-            batch_added.clear()
+            # batch_removed.clear()
+            # batch_added.clear()
             # 转换为 list 避免 set 迭代时修改 (虽然这里只读)
             current_ids_list = list(affected_word_ids)
             # 彻底删除这个key
@@ -251,20 +251,21 @@ def train_bpe(
                 # word.apply_merge 内部实现了 Lookahead 检查，防止 Banana 重复统计
                 w_added, w_removed = word.apply_merge(best_pair, next_token_id)
 
-                for p, c in w_removed.items():
-                    batch_removed[p] += c
-                for p, c in w_added.items():
-                    batch_added[p] += c
-                    # 懒惰更新：只增不减
-                    inverted_index.add_occurrence(p, word_id)
+                # for p, c in w_removed.items():
+                #     batch_removed[p] += c
+                # for p, c in w_added.items():
+                #     batch_added[p] += c
+                #     # 懒惰更新：只增不减
+                #     inverted_index.add_occurrence(p, word_id)
 
-            for pair, count in batch_removed.items():
-                if pair == best_pair:
-                    continue  # <--- 核心：既然已经删全家了，就别再减它了
-                stats_engine.update(pair, -count)
-            for pair, count in batch_added.items():
-                stats_engine.update(pair, count)
-                inverted_index.add_occurrence(pair, word_id)
+                for pair, count in w_removed.items():
+                    # if pair == best_pair:
+                    #     continue  # <--- 核心：既然已经删全家了，就别再减它了
+                    stats_engine.update(pair, -count)
+                    
+                for pair, count in w_added.items():
+                    stats_engine.update(pair, count)
+                    inverted_index.add_occurrence(pair, word_id)
 
             next_token_id += 1
             pbar.update(1)
