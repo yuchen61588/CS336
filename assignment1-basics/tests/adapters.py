@@ -561,7 +561,7 @@ def get_tokenizer(
     Returns:
         A BPE tokenizer that uses the provided vocab, merges, and special tokens.
     """
-    tokenizer = Tokenizer(vocab, merges, special_tokens)
+    tokenizer = Tokenizer(100000,vocab, merges, special_tokens)
     # 为了通过 test_encode_iterable_* 系列测试
     # 测试文件要求 tokenizer 必须有一个 encode_iterable(iterable) 方法
     # 如果你的类里没写这个方法，我们在这里动态给它补上（Monkey Patching），

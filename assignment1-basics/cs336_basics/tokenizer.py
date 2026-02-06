@@ -219,8 +219,8 @@ class Tokenizer:
             # 注意：i 现在是新 token，next_pos[i] 是原来的 k
             if next_pos[i]!=-1:
                 new_rank_right = get_rank(i)
-                if new_rank_left is not None:
-                    heapq.heappush((pq,(new_rank_right,i)))
+                if new_rank_right is not None:
+                    heapq.heappush(pq,(new_rank_right,i))
 
         # 4. 重组结果列表
         # 从头(0)或第一个有效节点开始遍历 next_pos
@@ -229,8 +229,8 @@ class Tokenizer:
         # 寻找头节点 找到prev[i] = -1的 0永远是链表头
         cur = 0
         while cur!=-1:
-            result.append(token_ids[curr])
-            curr = next_pos[curr]
+            result.append(token_ids[cur])
+            cur = next_pos[cur]
 
         return result
 
