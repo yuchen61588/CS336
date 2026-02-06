@@ -41,18 +41,22 @@ def get_tokenizer_from_vocab_merges_path(
     merges_path: str | os.PathLike,
     special_tokens: list[str] | None = None,
 ):
+    # 将 Unicode 字符 → 还原为原始字节（0-255）
     gpt2_byte_decoder = {v: k for k, v in gpt2_bytes_to_unicode().items()}
+    # json序列化
     with open(vocab_path) as vocab_f:
         gpt2_vocab = json.load(vocab_f)
+    # 对于merge 可能有换行和空行 去除右边换行符
     gpt2_bpe_merges = []
     with open(merges_path) as f:
         for line in f:
-            cleaned_line = line.rstrip()
+            cleaned_line = line.rstrip() # 去掉右边换行符 \n
             if cleaned_line and len(cleaned_line.split(" ")) == 2:
                 gpt2_bpe_merges.append(tuple(cleaned_line.split(" ")))
     # The GPT-2 tokenizer uses a remapped unicode encoding for bytes. Let's
     # just return the original bytes, so we don't force students to use
     # any particular encoding scheme.
+    # GPT2的格式转化为原始字节
     vocab = {
         gpt2_vocab_index: bytes([gpt2_byte_decoder[token] for token in gpt2_vocab_item])
         for gpt2_vocab_item, gpt2_vocab_index in gpt2_vocab.items()
@@ -73,7 +77,7 @@ def get_tokenizer_from_vocab_merges_path(
     ]
     return get_tokenizer(vocab, merges, special_tokens)
 
-
+# 空字符串的处理。
 def test_roundtrip_empty():
     tokenizer = get_tokenizer_from_vocab_merges_path(
         vocab_path=VOCAB_PATH,
@@ -103,7 +107,7 @@ def test_empty_matches_tiktoken():
     assert tokenizer.decode(ids) == test_string
     assert reference_tokenizer.decode(reference_ids) == test_string
 
-
+# 测试单个单个 ASCII 字符（如 "s"）。
 def test_roundtrip_single_character():
     tokenizer = get_tokenizer_from_vocab_merges_path(
         vocab_path=VOCAB_PATH,
@@ -133,7 +137,7 @@ def test_single_character_matches_tiktoken():
     assert tokenizer.decode(ids) == test_string
     assert reference_tokenizer.decode(reference_ids) == test_string
 
-
+# Unicode 与字节编码测试
 def test_roundtrip_single_unicode_character():
     tokenizer = get_tokenizer_from_vocab_merges_path(
         vocab_path=VOCAB_PATH,
@@ -160,7 +164,7 @@ def test_single_unicode_character_matches_tiktoken():
     assert tokenizer.decode(ids) == test_string
     assert reference_tokenizer.decode(reference_ids) == test_string
 
-
+# 普通英文句子 "Hello, how are you?"
 def test_roundtrip_ascii_string():
     tokenizer = get_tokenizer_from_vocab_merges_path(
         vocab_path=VOCAB_PATH,
@@ -189,7 +193,7 @@ def test_ascii_string_matches_tiktoken():
     assert tokenizer.decode(ids) == test_string
     assert reference_tokenizer.decode(reference_ids) == test_string
 
-
+# 混合字符
 def test_roundtrip_unicode_string():
     tokenizer = get_tokenizer_from_vocab_merges_path(
         vocab_path=VOCAB_PATH,
@@ -215,7 +219,8 @@ def test_unicode_string_matches_tiktoken():
     assert tokenizer.decode(ids) == test_string
     assert reference_tokenizer.decode(reference_ids) == test_string
 
-
+# 特殊 Token 处理
+# 字符串中包含 <|endoftext|>
 def test_roundtrip_unicode_string_with_special_tokens():
     tokenizer = get_tokenizer_from_vocab_merges_path(
         vocab_path=VOCAB_PATH, merges_path=MERGES_PATH, special_tokens=["<|endoftext|>"]
@@ -244,7 +249,7 @@ def test_unicode_string_with_special_tokens_matches_tiktoken():
     assert tokenizer.decode(ids) == test_string
     assert reference_tokenizer.decode(reference_ids) == test_string
 
-
+# 测试内容：同时注册 <|endoftext|> 和 <|endoftext|><|endoftext|> (双倍)。
 def test_overlapping_special_tokens():
     tokenizer = get_tokenizer_from_vocab_merges_path(
         vocab_path=VOCAB_PATH,
@@ -261,7 +266,7 @@ def test_overlapping_special_tokens():
     # Test roundtrip
     assert tokenizer.decode(ids) == test_string
 
-
+#内容：
 def test_address_roundtrip():
     tokenizer = get_tokenizer_from_vocab_merges_path(
         vocab_path=VOCAB_PATH,
@@ -273,7 +278,7 @@ def test_address_roundtrip():
     ids = tokenizer.encode(corpus_contents)
     assert tokenizer.decode(ids) == corpus_contents
 
-
+# 地址文本（包含数字、逗号）。
 def test_address_matches_tiktoken():
     reference_tokenizer = tiktoken.get_encoding("gpt2")
     tokenizer = get_tokenizer_from_vocab_merges_path(
@@ -290,7 +295,8 @@ def test_address_matches_tiktoken():
     assert tokenizer.decode(ids) == corpus_contents
     assert reference_tokenizer.decode(reference_ids) == corpus_contents
 
-
+# 真实语料测试\
+# 德语文本
 def test_german_roundtrip():
     tokenizer = get_tokenizer_from_vocab_merges_path(
         vocab_path=VOCAB_PATH,
@@ -319,7 +325,7 @@ def test_german_matches_tiktoken():
     assert tokenizer.decode(ids) == corpus_contents
     assert reference_tokenizer.decode(reference_ids) == corpus_contents
 
-
+# 故事文本。这是你主要的训练数据类型。
 def test_tinystories_sample_roundtrip():
     tokenizer = get_tokenizer_from_vocab_merges_path(
         vocab_path=VOCAB_PATH,
@@ -331,7 +337,7 @@ def test_tinystories_sample_roundtrip():
     ids = tokenizer.encode(corpus_contents)
     assert tokenizer.decode(ids) == corpus_contents
 
-
+# 故事文本。这是你主要的训练数据类型。
 def test_tinystories_matches_tiktoken():
     reference_tokenizer = tiktoken.get_encoding("gpt2")
     tokenizer = get_tokenizer_from_vocab_merges_path(
@@ -347,7 +353,7 @@ def test_tinystories_matches_tiktoken():
     assert tokenizer.decode(ids) == corpus_contents
     assert reference_tokenizer.decode(reference_ids) == corpus_contents
 
-
+# 特殊 Token 紧挨着换行符
 def test_encode_special_token_trailing_newlines():
     reference_tokenizer = tiktoken.get_encoding("gpt2")
     tokenizer = get_tokenizer_from_vocab_merges_path(
@@ -363,7 +369,7 @@ def test_encode_special_token_trailing_newlines():
     assert tokenizer.decode(ids) == corpus_contents
     assert reference_tokenizer.decode(reference_ids) == corpus_contents
 
-
+# 特殊 Token 紧挨着换行符 \n。
 def test_encode_special_token_double_newline_non_whitespace():
     reference_tokenizer = tiktoken.get_encoding("gpt2")
     tokenizer = get_tokenizer_from_vocab_merges_path(
@@ -379,7 +385,7 @@ def test_encode_special_token_double_newline_non_whitespace():
     assert tokenizer.decode(ids) == corpus_contents
     assert reference_tokenizer.decode(reference_ids) == corpus_contents
 
-
+# 这部分直接测试你的代码架构是否支持 Generator/Iterator，以及是否真的做到了流式加载。
 def test_encode_iterable_tinystories_sample_roundtrip():
     tokenizer = get_tokenizer_from_vocab_merges_path(
         vocab_path=VOCAB_PATH,
@@ -417,6 +423,7 @@ def test_encode_iterable_tinystories_matches_tiktoken():
     not sys.platform.startswith("linux"),
     reason="rlimit support for non-linux systems is spotty.",
 )
+# 限制内存 1MB，输入文件 5MB。
 def test_encode_iterable_memory_usage():
     tokenizer = get_tokenizer_from_vocab_merges_path(
         vocab_path=VOCAB_PATH,
@@ -433,6 +440,7 @@ def test_encode_iterable_memory_usage():
     reason="rlimit support for non-linux systems is spotty.",
 )
 @pytest.mark.xfail(reason="Tokenizer.encode is expected to take more memory than allotted (1MB).")
+# 限制内存 1MB，调用普通的 encode() 处理 5MB 文件。
 def test_encode_memory_usage():
     """
     We expect this test to fail, since Tokenizer.encode is not expected to be memory efficient.

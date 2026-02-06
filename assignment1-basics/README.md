@@ -87,4 +87,8 @@ rm -rf .venv
 uv venv --python 3.12
 source .venv/bin/activate
 
+# 测试BPE分词器训练部分
 pytest tests/test_train_bpe.py -v
+# 测试BPE分词器推理部分
+pytest tests/test_tokenizer.py -v
+

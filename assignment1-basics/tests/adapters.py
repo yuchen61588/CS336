@@ -9,6 +9,7 @@ import torch
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
 from cs336_basics.train_bpe import train_bpe
+from cs336_basics.tokenizer import Tokenizer
 from typing import List, Tuple, Dict, Optional, Any
 
 def run_linear(
@@ -560,6 +561,23 @@ def get_tokenizer(
     Returns:
         A BPE tokenizer that uses the provided vocab, merges, and special tokens.
     """
+    tokenizer = Tokenizer(100000,vocab, merges, special_tokens)
+    # 为了通过 test_encode_iterable_* 系列测试
+    # 测试文件要求 tokenizer 必须有一个 encode_iterable(iterable) 方法
+    # 如果你的类里没写这个方法，我们在这里动态给它补上（Monkey Patching），
+    # 这样你不需要去修改原来的 Tokenizer 类代码。
+    if not hasattr(tokenizer, "encode_iterable"):
+        import types
+        def encode_iterable(self, iterable):
+            for text in iterable:
+                # 调用你已实现的 encode
+                token_ids = self.encode(text)
+                for token_id in token_ids:
+                    yield token_id
+
+        tokenizer.encode_iterable = types.MethodType(encode_iterable, tokenizer)
+    return tokenizer
+
     raise NotImplementedError
 
 
@@ -592,7 +610,7 @@ def run_train_bpe(
     )
 
 
-        # 3. 返回结果 (保持不变，确保测试脚本能拿到返回值)
+    # 3. 返回结果 (保持不变，确保测试脚本能拿到返回值)
     return vocab, merges
 
 
