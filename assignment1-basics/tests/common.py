@@ -16,6 +16,11 @@ def gpt2_bytes_to_unicode() -> dict[int, str]:
 
     For example, `chr(0)` is `\x00`, which is an unprintable character:
 
+    返回一个从每个可能的字节（0到255的整数）到可打印Unicode字符串字符的映射。
+    此函数取自GPT-2代码。
+
+    例如，`chr(0)`是`\x00`，这是一个不可打印字符：
+
     >>> chr(0)
     '\x00'
     >>> print(chr(0))
@@ -34,9 +39,21 @@ def gpt2_bytes_to_unicode() -> dict[int, str]:
 
     This function can simplify the BPE implementation and makes it slightly easier to
     manually inspect the generated merges after they're serialized to a file.
+    因此，此函数返回一个字典`d`，其中`d[0]`返回`Ā`。
+视觉上可打印的字节保持其原始字符串表示[1]。
+例如，`chr(33)`返回`!`，因此相应地`d[33]`返回`!`。
+特别要注意的是，空格字符`chr(32)`变成`d[32]`，它返回'Ġ'。
+
+对于不可打印的字符，该函数将表示该字符的Unicode码点的整数
+（由Python的`ord`函数返回）偏移256。例如，`ord(" ")`返回`32`，
+因此空格字符' '被偏移到`256 + 32`。由于`chr(256 + 32)`返回`Ġ`，
+我们将其用作空格的字符串表示。
+
+此函数可以简化BPE实现，并使在序列化到文件后手动检查生成的合并结果变得稍微容易一些。
     """
     # These 188 integers can used as-is, since they are not whitespace or control characters.
     # See https://www.ssec.wisc.edu/~tomw/java/unicode.html.
+
     bs = list(range(ord("!"), ord("~") + 1)) + list(range(ord("¡"), ord("¬") + 1)) + list(range(ord("®"), ord("ÿ") + 1))
     cs = bs[:]
     # now get the representations of the other 68 integers that do need shifting
