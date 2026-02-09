@@ -91,4 +91,5 @@ source .venv/bin/activate
 pytest tests/test_train_bpe.py -v
 # 测试BPE分词器推理部分
 pytest tests/test_tokenizer.py -v
-
+# 测试model部分
+pytest tests/test_model.py -v

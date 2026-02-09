@@ -12,6 +12,18 @@ from cs336_basics.train_bpe import train_bpe
 from cs336_basics.tokenizer import Tokenizer
 from typing import List, Tuple, Dict, Optional, Any
 
+from cs336_basics.model import (
+    Linear,
+    Embedding,
+    SwiGLUFeedForward,
+    ROPE,
+    CausalMultiHeadSelfAttention,
+    Transformer_block,
+    TransformerLM,
+    RMSNorm
+)
+from cs336_basics.model_function import scaled_dot_product_attention, softmax
+import torch.nn.functional as F
 def run_linear(
     d_in: int,
     d_out: int,
@@ -19,17 +31,22 @@ def run_linear(
     in_features: Float[Tensor, " ... d_in"],
 ) -> Float[Tensor, " ... d_out"]:
     """
-    Given the weights of a Linear layer, compute the transformation of a batched input.
+        给定线性层的权重，计算批量输入的变换。
 
-    Args:
-        in_dim (int): The size of the input dimension
-        out_dim (int): The size of the output dimension
-        weights (Float[Tensor, "d_out d_in"]): The linear weights to use
-        in_features (Float[Tensor, "... d_in"]): The output tensor to apply the function to
+        参数:
+            in_dim (int): 输入维度的大小
+            out_dim (int): 输出维度的大小
+            weights (Float[Tensor, "d_out d_in"]): 要使用的线性权重
+            in_features (Float[Tensor, "... d_in"]): 要应用函数的输出张量
 
-    Returns:
-        Float[Tensor, "... d_out"]: The transformed output of your linear module.
-    """
+        返回:
+            Float[Tensor, "... d_out"]: 线性模块的变换输出。
+        """
+    linear = Linear(d_in,d_out)
+    linear.weight.data = weights
+    return linear(in_features)
+
+
 
     raise NotImplementedError
 
@@ -41,17 +58,20 @@ def run_embedding(
     token_ids: Int[Tensor, " ..."],
 ) -> Float[Tensor, " ... d_model"]:
     """
-    Given the weights of an Embedding layer, get the embeddings for a batch of token ids.
+    给定 Embedding 层的权重，获取一批 token ID 对应的嵌入向量。
 
-    Args:
-        vocab_size (int): The number of embeddings in the vocabulary
-        d_model (int): The size of the embedding dimension
-        weights (Float[Tensor, "vocab_size d_model"]): The embedding vectors to fetch from
-        token_ids (Int[Tensor, "..."]): The set of token ids to fetch from the Embedding layer
+    参数:
+        vocab_size (int): 词汇表中嵌入向量的数量（词表大小）
+        d_model (int): 嵌入维度的尺寸（向量长度）
+        weights (Float[Tensor, "vocab_size d_model"]): 要从中提取的嵌入向量矩阵
+        token_ids (Int[Tensor, "..."]): 要从 Embedding 层查询的 token ID 集合
 
-    Returns:
-        Float[Tensor, "... d_model"]: Batch of embeddings returned by your Embedding layer.
+    返回:
+        Float[Tensor, "... d_model"]: Embedding 层返回的一批嵌入向量。
     """
+    embed = Embedding(vocab_size,d_model)
+    embed.weight.data = weights
+    return embed(token_ids)
 
     raise NotImplementedError
 
@@ -64,27 +84,33 @@ def run_swiglu(
     w3_weight: Float[Tensor, " d_ff d_model"],
     in_features: Float[Tensor, " ... d_model"],
 ) -> Float[Tensor, " ... d_model"]:
-    """Given the weights of a SwiGLU network, return
-    the output of your implementation with these weights.
-
-    Args:
-        d_model (int): Dimensionality of the feedforward input and output.
-        d_ff (int): Dimensionality of the up-project happening internally to your swiglu.
-        w1_weight (Float[Tensor, "d_ff d_model"]): Stored weights for W1
-        w2_weight (Float[Tensor, "d_model d_ff"]): Stored weights for W2
-        w3_weight (Float[Tensor, "d_ff d_model"]): Stored weights for W3
-        in_features (Float[Tensor, "... d_model"]): Input embeddings to the feed-forward layer.
-
-    Returns:
-        Float[Tensor, "... d_model"]: Output embeddings of the same shape as the input embeddings.
     """
-    # Example:
-    # If your state dict keys match, you can use `load_state_dict()`
+        给定 SwiGLU 网络的权重，返回使用这些权重的实现输出。
+
+        参数:
+            d_model (int): 前馈输入和输出的维度
+            d_ff (int): SwiGLU 内部升维投影的维度
+            w1_weight (Float[Tensor, "d_ff d_model"]): W1 的存储权重
+            w2_weight (Float[Tensor, "d_model d_ff"]): W2 的存储权重
+            w3_weight (Float[Tensor, "d_ff d_model"]): W3 的存储权重
+            in_features (Float[Tensor, "... d_model"]): 输入到前馈层的嵌入向量
+
+        返回:
+            Float[Tensor, "... d_model"]: 与输入嵌入形状相同的输出嵌入
+        """
+    # 示例:
+    # 如果状态字典键匹配，可以使用 `load_state_dict()`
     # swiglu.load_state_dict(weights)
-    # You can also manually assign the weights
+    # 也可以手动赋值权重
     # swiglu.w1.weight.data = w1_weight
     # swiglu.w2.weight.data = w2_weight
     # swiglu.w3.weight.data = w3_weight
+    swiglu = SwiGLUFeedForward(d_model,d_ff)
+    swiglu.w1.weight.data = w1_weight
+    swiglu.w2.weight.data=w2_weight
+    swiglu.w3.weight.data=w3_weight
+    return swiglu(in_features)
+
     raise NotImplementedError
 
 
@@ -95,17 +121,18 @@ def run_scaled_dot_product_attention(
     mask: Bool[Tensor, " ... queries keys"] | None = None,
 ) -> Float[Tensor, " ... queries d_v"]:
     """
-    Given key (K), query (Q), and value (V) tensors, return
-    the output of your scaled dot product attention implementation.
+        给定键（K）、查询（Q）和值（V）张量，返回缩放点积注意力的实现输出。
 
-    Args:
-        Q (Float[Tensor, " ... queries d_k"]): Query tensor
-        K (Float[Tensor, " ... keys d_k"]): Key tensor
-        V (Float[Tensor, " ... values d_v"]): Values tensor
-        mask (Bool[Tensor, " ... queries keys"] | None): Mask tensor
-    Returns:
-        Float[Tensor, " ... queries d_v"]: Output of SDPA
-    """
+        参数:
+            Q (Float[Tensor, " ... queries d_k"]): 查询张量
+            K (Float[Tensor, " ... keys d_k"]): 键张量
+            V (Float[Tensor, " ... values d_v"]): 值张量
+            mask (Bool[Tensor, " ... queries keys"] | None): 掩码张量
+
+        返回:
+            Float[Tensor, " ... queries d_v"]: SDPA（缩放点积注意力）的输出
+        """
+    return scaled_dot_product_attention(Q,K,V,mask)
     raise NotImplementedError
 
 
@@ -119,27 +146,34 @@ def run_multihead_self_attention(
     in_features: Float[Tensor, " ... sequence_length d_in"],
 ) -> Float[Tensor, " ... sequence_length d_out"]:
     """
-    Given the key, query, and value projection weights of a naive unbatched
-    implementation of multi-head attention, return the output of an optimized batched
-    implementation. This implementation should handle the key, query, and value projections
-    for all heads in a single matrix multiply.
-    This function should not use RoPE.
-    See section 3.2.2 of Vaswani et al., 2017.
+        给定一个朴素非批量化多头注意力实现的键、查询和值投影权重，
+        返回优化批量化实现的输出。该实现应在**单次矩阵乘法中**
+        处理所有头的键、查询和值投影。
+        此函数不应使用 RoPE。
+        参见 Vaswani et al., 2017 论文第 3.2.2 节。
 
-    Args:
-        d_model (int): Dimensionality of the feedforward input and output.
-        num_heads (int): Number of heads to use in multi-headed attention.
-        max_seq_len (int): Maximum sequence length to pre-cache if your implementation does that.
-        q_proj_weight (Float[Tensor, "d_k d_in"]): Weights for the Q projection
-        k_proj_weight (Float[Tensor, "d_k d_in"]): Weights for the K projection
-        v_proj_weight (Float[Tensor, "d_k d_in"]): Weights for the V projection
-        o_proj_weight (Float[Tensor, "d_model d_v"]): Weights for the output projection
-        in_features (Float[Tensor, "... sequence_length d_in"]): Tensor to run your implementation on.
+        参数:
+            d_model (int): 前馈输入和输出的维度
+            num_heads (int): 多头注意力中使用的头数
+            max_seq_len (int): 如果实现需要预缓存，最大序列长度
+            q_proj_weight (Float[Tensor, "d_k d_in"]): Q 投影的权重
+            k_proj_weight (Float[Tensor, "d_k d_in"]): K 投影的权重
+            v_proj_weight (Float[Tensor, "d_k d_in"]): V 投影的权重
+            o_proj_weight (Float[Tensor, "d_model d_v"]): 输出投影的权重
+            in_features (Float[Tensor, "... sequence_length d_in"]): 要在其上运行实现的张量
 
-    Returns:
-        Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
-        implementation with the given QKV projection weights and input features.
-    """
+        返回:
+            Float[Tensor, " ... sequence_length d_out"]: 使用给定的 QKV 投影权重和输入特征，
+            运行优化批量化多头注意力实现后的输出张量。
+        """
+    mha = CausalMultiHeadSelfAttention(d_model,num_heads)
+
+    qkv_weight =torch.cat([q_proj_weight,k_proj_weight,v_proj_weight],dim=0)
+    mha.qkv_proj.weight.data = qkv_weight
+    mha.o_proj.weight.data = o_proj_weight
+    # 这是一个不带 RoPE 的测试，传入 None
+    return mha(in_features, rope_embed=None)
+
     raise NotImplementedError
 
 
@@ -156,30 +190,43 @@ def run_multihead_self_attention_with_rope(
     token_positions: Int[Tensor, " ... sequence_length"] | None = None,
 ) -> Float[Tensor, " ... sequence_length d_out"]:
     """
-    Given the key, query, and value projection weights of a naive unbatched
-    implementation of multi-head attention, return the output of an optimized batched
-    implementation. This implementation should handle the key, query, and value projections
-    for all heads in a single matrix multiply.
-    This version of MHA should include RoPE.
-    In this case, the RoPE embedding dimension must be the head embedding dimension (d_model // num_heads).
-    See section 3.2.2 of Vaswani et al., 2017.
+    给定一个朴素非批量化多头注意力实现的键、查询和值投影权重，
+    返回优化批量化实现的输出。该实现应在**单次矩阵乘法中**
+    处理所有头的键、查询和值投影。
+    此版本的 MHA 应包含 RoPE。
+    在此情况下，RoPE 嵌入维度必须等于头的嵌入维度（d_model // num_heads）。
+    参见 Vaswani et al., 2017 论文第 3.2.2 节。
 
-    Args:
-        d_model (int): Dimensionality of the feedforward input and output.
-        num_heads (int): Number of heads to use in multi-headed attention.
-        max_seq_len (int): Maximum sequence length to pre-cache if your implementation does that.
-        theta (float): RoPE parameter.
-        q_proj_weight (Float[Tensor, "d_k d_in"]): Weights for the Q projection
-        k_proj_weight (Float[Tensor, "d_k d_in"]): Weights for the K projection
-        v_proj_weight (Float[Tensor, "d_k d_in"]): Weights for the V projection
-        o_proj_weight (Float[Tensor, "d_model d_v"]): Weights for the output projection
-        in_features (Float[Tensor, "... sequence_length d_in"]): Tensor to run your implementation on.
-        token_positions (Int[Tensor, " ... sequence_length"] | None): Optional tensor with the positions of the tokens
+    参数:
+        d_model (int): 前馈输入和输出的维度
+        num_heads (int): 多头注意力中使用的头数
+        max_seq_len (int): 如果实现需要预缓存，最大序列长度
+        theta (float): RoPE 参数（频率基数，通常 10000）
+        q_proj_weight (Float[Tensor, "d_k d_in"]): Q 投影的权重
+        k_proj_weight (Float[Tensor, "d_k d_in"]): K 投影的权重
+        v_proj_weight (Float[Tensor, "d_k d_in"]): V 投影的权重
+        o_proj_weight (Float[Tensor, "d_model d_v"]): 输出投影的权重
+        in_features (Float[Tensor, "... sequence_length d_in"]): 要在其上运行实现的张量
+        token_positions (Int[Tensor, " ... sequence_length"] | None): 可选的 token 位置张量
 
-    Returns:
-        Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
-        implementation with the given QKV projection weights and input features.
+    返回:
+        Float[Tensor, " ... sequence_length d_out"]: 使用给定的 QKV 投影权重和输入特征，
+        运行优化批量化多头注意力实现后的输出张量。
     """
+    mha = CausalMultiHeadSelfAttention(d_model, num_heads)
+
+    # 同样进行权重合并
+    qkv_weight = torch.cat([q_proj_weight, k_proj_weight, v_proj_weight], dim=0)
+    mha.qkv_proj.weight.data = qkv_weight
+    mha.o_proj.weight.data = o_proj_weight
+
+    d_k = d_model//num_heads
+    rope = ROPE(theta,d_k,max_seq_len)
+    return mha(in_features, rope_embed=rope, token_positions=token_positions)
+
+
+
+
     raise NotImplementedError
 
 
@@ -191,17 +238,20 @@ def run_rope(
     token_positions: Int[Tensor, " ... sequence_length"],
 ) -> Float[Tensor, " ... sequence_length d_k"]:
     """
-    Run RoPE for a given input tensor.
+    对给定输入张量运行 RoPE。
 
-    Args:
-        d_k (int): Embedding dimension size for the query or key tensor.
-        theta (float): RoPE parameter.
-        max_seq_len (int): Maximum sequence length to pre-cache if your implementation does that.
-        in_query_or_key (Float[Tensor, "... sequence_length d_k"]): Input tensor to run RoPE on.
-        token_positions (Int[Tensor, "... sequence_length"]): Tensor of shape (batch_size, sequence_length) with the token positions
-    Returns:
-        Float[Tensor, " ... sequence_length d_k"]: Tensor with RoPEd input.
+    参数:
+        d_k (int): 查询或键张量的嵌入维度大小
+        theta (float): RoPE 参数（频率基数）
+        max_seq_len (int): 如果实现需要预缓存，最大序列长度
+        in_query_or_key (Float[Tensor, "... sequence_length d_k"]): 要运行 RoPE 的输入张量
+        token_positions (Int[Tensor, "... sequence_length"]): 形状为 (batch_size, sequence_length) 的张量，
+                                                              包含 token 的位置信息
+    返回:
+        Float[Tensor, " ... sequence_length d_k"]: 经过 RoPE 处理的输入张量
     """
+    rope = ROPE(theta, d_k, max_seq_len)
+    return rope(in_query_or_key,token_positions)
     raise NotImplementedError
 
 
@@ -215,66 +265,79 @@ def run_transformer_block(
     in_features: Float[Tensor, " batch sequence_length d_model"],
 ) -> Float[Tensor, " batch sequence_length d_model"]:
     """
-    Given the weights of a pre-norm Transformer block and input features,
-    return the output of running the Transformer block on the input features.
+        给定预归一化 Transformer 块的权重和输入特征，返回在输入特征上运行 Transformer 块的输出。
 
-    This function should use RoPE.
-    Depending on your implementation, you may simply need to pass the relevant args
-    to your TransformerBlock constructor, or you may need to initialize your own RoPE
-    class and pass that instead.
+        此函数应使用 RoPE。
+        根据你的实现，你可能只需将相关参数传递给 TransformerBlock 构造函数，
+        或者你可能需要初始化自己的 RoPE 类并传递它。
 
-    Args:
-        d_model (int): The dimensionality of the Transformer block input.
-        num_heads (int): Number of heads to use in multi-headed attention. `d_model` must be
-            evenly divisible by `num_heads`.
-        d_ff (int): Dimensionality of the feed-forward inner layer.
-        max_seq_len (int): Maximum sequence length to pre-cache if your implementation does that.
-        theta (float): RoPE parameter.
-        weights (dict[str, Tensor]):
-            State dict of our reference implementation.
-            The keys of this dictionary are:
-            - `attn.q_proj.weight`
-                The query projections for all `num_heads` attention heads.
-                Shape is (d_model, d_model).
-                The rows are ordered by matrices of shape (num_heads, d_k),
-                so `attn.q_proj.weight == torch.cat([q_heads.0.weight, ..., q_heads.N.weight], dim=0)`.
-            - `attn.k_proj.weight`
-                The key projections for all `num_heads` attention heads.
-                Shape is (d_model, d_model).
-                The rows are ordered by matrices of shape (num_heads, d_k),
-                so `attn.k_proj.weight == torch.cat([k_heads.0.weight, ..., k_heads.N.weight], dim=0)`.
-            - `attn.v_proj.weight`
-                The value projections for all `num_heads` attention heads.
-                Shape is (d_model, d_model).
-                The rows are ordered by matrices of shape (num_heads, d_v),
-                so `attn.v_proj.weight == torch.cat([v_heads.0.weight, ..., v_heads.N.weight], dim=0)`.
-            - `attn.output_proj.weight`
-                Weight of the multi-head self-attention output projection
-                Shape is (d_model, d_model).
-            - `ln1.weight`
-                Weights of affine transform for the first RMSNorm
-                applied in the transformer block.
-                Shape is (d_model,).
-            - `ffn.w1.weight`
-                Weight of the first linear transformation in the FFN.
-                Shape is (d_model, d_ff).
-            - `ffn.w2.weight`
-                Weight of the second linear transformation in the FFN.
-                Shape is (d_ff, d_model).
-            - `ffn.w3.weight`
-                Weight of the third linear transformation in the FFN.
-                Shape is (d_model, d_ff).
-            - `ln2.weight`
-                Weights of affine transform for the second RMSNorm
-                applied in the transformer block.
-                Shape is (d_model,).
-        in_features (Float[Tensor, "batch sequence_length d_model"]):
-            Tensor to run your implementation on.
+        参数:
+            d_model (int): Transformer 块输入的维度
+            num_heads (int): 多头注意力中使用的头数。`d_model` 必须能被 `num_heads` 整除。
+            d_ff (int): 前馈网络内层的维度
+            max_seq_len (int): 如果实现需要预缓存，最大序列长度
+            theta (float): RoPE 参数
+            weights (dict[str, Tensor]):
+                参考实现的状态字典。键包括：
+                - `attn.q_proj.weight`
+                    所有 `num_heads` 注意力头的查询投影。
+                    形状为 (d_model, d_model)。
+                    行按 (num_heads, d_k) 形状的矩阵排序，
+                    即 `attn.q_proj.weight == torch.cat([q_heads.0.weight, ..., q_heads.N.weight], dim=0)`。
+                - `attn.k_proj.weight`
+                    所有 `num_heads` 注意力头的键投影。
+                    形状为 (d_model, d_model)。
+                    行按 (num_heads, d_k) 形状的矩阵排序，
+                    即 `attn.k_proj.weight == torch.cat([k_heads.0.weight, ..., k_heads.N.weight], dim=0)`。
+                - `attn.v_proj.weight`
+                    所有 `num_heads` 注意力头的值投影。
+                    形状为 (d_model, d_model)。
+                    行按 (num_heads, d_v) 形状的矩阵排序，
+                    即 `attn.v_proj.weight == torch.cat([v_heads.0.weight, ..., v_heads.N.weight], dim=0)`。
+                - `attn.output_proj.weight`
+                    多头自注意力输出投影的权重。
+                    形状为 (d_model, d_model)。
+                - `ln1.weight`
+                    Transformer 块中第一个 RMSNorm 仿射变换的权重。
+                    形状为 (d_model,)。
+                - `ffn.w1.weight`
+                    FFN 中第一个线性变换的权重。
+                    形状为 (d_model, d_ff)。
+                - `ffn.w2.weight`
+                    FFN 中第二个线性变换的权重。
+                    形状为 (d_ff, d_model)。
+                - `ffn.w3.weight`
+                    FFN 中第三个线性变换的权重。
+                    形状为 (d_model, d_ff)。
+                - `ln2.weight`
+                    Transformer 块中第二个 RMSNorm 仿射变换的权重。
+                    形状为 (d_model,)。
+            in_features (Float[Tensor, "batch sequence_length d_model"]):
+                要在其上运行实现的张量。
 
-    Returns:
-        Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
-        running the Transformer block on the input features while using RoPE.
-    """
+        返回:
+            Float[Tensor, "batch sequence_length d_model"]: 使用 RoPE 在输入特征上运行 Transformer 块的输出张量。
+        """
+    block = Transformer_block(d_model, num_heads, d_ff)
+
+    # 构造 RoPE
+    d_k = d_model // num_heads
+    rope = ROPE(theta, d_k, max_seq_len)
+
+    # 手动加载权重以处理 QKV 合并
+    q = weights['attn.q_proj.weight']
+    k = weights['attn.k_proj.weight']
+    v = weights['attn.v_proj.weight']
+    block.mha.qkv_proj.weight.data = torch.cat([q, k, v], dim=0)
+
+    block.mha.o_proj.weight.data = weights['attn.output_proj.weight']
+    block.rms_norm1.weight.data = weights['ln1.weight']
+    block.rms_norm2.weight.data = weights['ln2.weight']
+    block.ffn.w1.weight.data = weights['ffn.w1.weight']
+    block.ffn.w2.weight.data = weights['ffn.w2.weight']
+    block.ffn.w3.weight.data = weights['ffn.w3.weight']
+
+    return block(in_features, rope_embed=rope)
     raise NotImplementedError
 
 
@@ -289,74 +352,111 @@ def run_transformer_lm(
     weights: dict[str, Tensor],
     in_indices: Int[Tensor, " batch_size sequence_length"],
 ) -> Float[Tensor, " batch_size sequence_length vocab_size"]:
-    """Given the weights of a Transformer language model and input indices,
-    return the output of running a forward pass on the input indices.
-
-    This function should use RoPE.
-
-    Args:
-        vocab_size (int): The number of unique items in the output vocabulary to be predicted.
-        context_length (int): The maximum number of tokens to process at once.
-        d_model (int): The dimensionality of the model embeddings and sublayer outputs.
-        num_layers (int): The number of Transformer layers to use.
-        num_heads (int): Number of heads to use in multi-headed attention. `d_model` must be
-            evenly divisible by `num_heads`.
-        d_ff (int): Dimensionality of the feed-forward inner layer (section 3.3).
-        rope_theta (float): The RoPE $\Theta$ parameter.
-        weights (dict[str, Tensor]):
-            State dict of our reference implementation. {num_layers} refers to an
-            integer between `0` and `num_layers - 1` (the layer index).
-            The keys of this dictionary are:
-            - `token_embeddings.weight`
-                Token embedding matrix. Shape is (vocab_size, d_model).
-            - `layers.{num_layers}.attn.q_proj.weight`
-                The query projections for all `num_heads` attention heads.
-                Shape is (num_heads * (d_model / num_heads), d_model).
-                The rows are ordered by matrices of shape (num_heads, d_k),
-                so `attn.q_proj.weight == torch.cat([q_heads.0.weight, ..., q_heads.N.weight], dim=0)`.
-            - `layers.{num_layers}.attn.k_proj.weight`
-                The key projections for all `num_heads` attention heads.
-                Shape is (num_heads * (d_model / num_heads), d_model).
-                The rows are ordered by matrices of shape (num_heads, d_k),
-                so `attn.k_proj.weight == torch.cat([k_heads.0.weight, ..., k_heads.N.weight], dim=0)`.
-            - `layers.{num_layers}.attn.v_proj.weight`
-                The value projections for all `num_heads` attention heads.
-                Shape is (num_heads * (d_model / num_heads), d_model).
-                The rows are ordered by matrices of shape (num_heads, d_v),
-                so `attn.v_proj.weight == torch.cat([v_heads.0.weight, ..., v_heads.N.weight], dim=0)`.
-            - `layers.{num_layers}.attn.output_proj.weight`
-                Weight of the multi-head self-attention output projection
-                Shape is ((d_model / num_heads) * num_heads, d_model).
-            - `layers.{num_layers}.ln1.weight`
-                Weights of affine transform for the first RMSNorm
-                applied in the transformer block.
-                Shape is (d_model,).
-            - `layers.{num_layers}.ffn.w1.weight`
-                Weight of the first linear transformation in the FFN.
-                Shape is (d_model, d_ff).
-            - `layers.{num_layers}.ffn.w2.weight`
-                Weight of the second linear transformation in the FFN.
-                Shape is (d_ff, d_model).
-            - `layers.{num_layers}.ffn.w3.weight`
-                Weight of the third linear transformation in the FFN.
-                Shape is (d_model, d_ff).
-            - `layers.{num_layers}.ln2.weight`
-                Weights of affine transform for the second RMSNorm
-                applied in the transformer block.
-                Shape is (d_model,).
-            - `ln_final.weight`
-                Weights of affine transform for RMSNorm applied to the output of the final transformer block.
-                Shape is (d_model, ).
-            - `lm_head.weight`
-                Weights of the language model output embedding.
-                Shape is (vocab_size, d_model).
-        in_indices (Int[Tensor, "batch_size sequence_length"]) Tensor with input indices to run the language model on. Shape is (batch_size, sequence_length), where
-            `sequence_length` is at most `context_length`.
-
-    Returns:
-        Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
-        next-word distribution for each token.
     """
+        给定 Transformer 语言模型的权重和输入索引，返回在输入索引上运行前向传播的输出。
+
+        此函数应使用 RoPE。
+
+        参数:
+            vocab_size (int): 输出词汇表中要预测的唯一项数量（词表大小）
+            context_length (int): 一次处理的最大 token 数（上下文长度）
+            d_model (int): 模型嵌入和子层输出的维度
+            num_layers (int): 使用的 Transformer 层数
+            num_heads (int): 多头注意力中使用的头数。`d_model` 必须能被 `num_heads` 整除。
+            d_ff (int): 前馈网络内层的维度（论文第 3.3 节）
+            rope_theta (float): RoPE 的 $\Theta$ 参数（频率基数）
+            weights (dict[str, Tensor]):
+                参考实现的状态字典。{num_layers} 表示介于 `0` 和 `num_layers - 1` 之间的整数（层索引）。
+                字典的键包括：
+                - `token_embeddings.weight`
+                    Token 嵌入矩阵。形状为 (vocab_size, d_model)。
+                - `layers.{num_layers}.attn.q_proj.weight`
+                    所有 `num_heads` 注意力头的查询投影。
+                    形状为 (num_heads * (d_model / num_heads), d_model)。
+                    行按 (num_heads, d_k) 形状的矩阵排序，
+                    即 `attn.q_proj.weight == torch.cat([q_heads.0.weight, ..., q_heads.N.weight], dim=0)`。
+                - `layers.{num_layers}.attn.k_proj.weight`
+                    所有 `num_heads` 注意力头的键投影。
+                    形状为 (num_heads * (d_model / num_heads), d_model)。
+                    行按 (num_heads, d_k) 形状的矩阵排序，
+                    即 `attn.k_proj.weight == torch.cat([k_heads.0.weight, ..., k_heads.N.weight], dim=0)`。
+                - `layers.{num_layers}.attn.v_proj.weight`
+                    所有 `num_heads` 注意力头的值投影。
+                    形状为 (num_heads * (d_model / num_heads), d_model)。
+                    行按 (num_heads, d_v) 形状的矩阵排序，
+                    即 `attn.v_proj.weight == torch.cat([v_heads.0.weight, ..., v_heads.N.weight], dim=0)`。
+                - `layers.{num_layers}.attn.output_proj.weight`
+                    多头自注意力输出投影的权重。
+                    形状为 ((d_model / num_heads) * num_heads, d_model)。
+                - `layers.{num_layers}.ln1.weight`
+                    Transformer 块中第一个 RMSNorm 仿射变换的权重。
+                    形状为 (d_model,)。
+                - `layers.{num_layers}.ffn.w1.weight`
+                    FFN 中第一个线性变换的权重。
+                    形状为 (d_model, d_ff)。
+                - `layers.{num_layers}.ffn.w2.weight`
+                    FFN 中第二个线性变换的权重。
+                    形状为 (d_ff, d_model)。
+                - `layers.{num_layers}.ffn.w3.weight`
+                    FFN 中第三个线性变换的权重。
+                    形状为 (d_model, d_ff)。
+                - `layers.{num_layers}.ln2.weight`
+                    Transformer 块中第二个 RMSNorm 仿射变换的权重。
+                    形状为 (d_model,)。
+                - `ln_final.weight`
+                    应用于最终 Transformer 块输出的 RMSNorm 仿射变换权重。
+                    形状为 (d_model,)。
+                - `lm_head.weight`
+                    语言模型输出嵌入的权重。
+                    形状为 (vocab_size, d_model)。
+            in_indices (Int[Tensor, "batch_size sequence_length"]):
+                要在其上运行语言模型的输入索引张量。形状为 (batch_size, sequence_length)，
+                其中 `sequence_length` 最多为 `context_length`。
+
+        返回:
+            Float[Tensor, "batch_size sequence_length vocab_size"]:
+                每个 token 预测的未归一化下一个词分布张量（logits）。
+        """
+    lm = TransformerLM(vocab_size, context_length, d_model, num_layers, num_heads, d_ff, rope_theta)
+
+    # 你的 TransformerLM __init__ 中硬编码了 theta=10000.0
+    # 为了通过可能使用不同 theta 的测试，我们需要在这里覆盖它
+
+
+    # 构造新的 state_dict 以匹配你的模型结构（主要是 QKV 合并和层命名）
+    # 你的模型中层列表叫 self.layers，这与测试权重的键 'layers.0...' 匹配
+    # 但你的 MHA 内部叫 qkv_proj，测试权重是分开的
+
+    new_state_dict = {}
+    # 复制非层权重
+    new_state_dict['embedding.weight'] = weights['token_embeddings.weight']
+    new_state_dict['final_norm.weight'] = weights['ln_final.weight']
+    new_state_dict['output_head.weight'] = weights['lm_head.weight']
+
+    # 处理每一层
+    for i in range(num_layers):
+        src_prefix = f'layers.{i}.'
+        tgt_prefix = f'layers.{i}.'
+
+        # 1. 合并 QKV
+        q = weights[f'{src_prefix}attn.q_proj.weight']
+        k = weights[f'{src_prefix}attn.k_proj.weight']
+        v = weights[f'{src_prefix}attn.v_proj.weight']
+        new_state_dict[f'{tgt_prefix}mha.qkv_proj.weight'] = torch.cat([q, k, v], dim=0)
+
+        # 2. 其他权重直接映射
+        # 注意：你的模型中属性名是 mha, rms_norm1, ffn, rms_norm2
+        new_state_dict[f'{tgt_prefix}mha.o_proj.weight'] = weights[f'{src_prefix}attn.output_proj.weight']
+        new_state_dict[f'{tgt_prefix}rms_norm1.weight'] = weights[f'{src_prefix}ln1.weight']
+        new_state_dict[f'{tgt_prefix}rms_norm2.weight'] = weights[f'{src_prefix}ln2.weight']
+
+        new_state_dict[f'{tgt_prefix}ffn.w1.weight'] = weights[f'{src_prefix}ffn.w1.weight']
+        new_state_dict[f'{tgt_prefix}ffn.w2.weight'] = weights[f'{src_prefix}ffn.w2.weight']
+        new_state_dict[f'{tgt_prefix}ffn.w3.weight'] = weights[f'{src_prefix}ffn.w3.weight']
+
+    lm.load_state_dict(new_state_dict)
+
+    return lm(in_indices)
     raise NotImplementedError
 
 
@@ -366,34 +466,39 @@ def run_rmsnorm(
     weights: Float[Tensor, " d_model"],
     in_features: Float[Tensor, " ... d_model"],
 ) -> Float[Tensor, " ... d_model"]:
-    """Given the weights of a RMSNorm affine transform,
-    return the output of running RMSNorm on the input features.
-
-    Args:
-        d_model (int): The dimensionality of the RMSNorm input.
-        eps: (float): A value added to the denominator for numerical stability.
-        weights (Float[Tensor, "d_model"]): RMSNorm weights.
-        in_features (Float[Tensor, "... d_model"]): Input features to run RMSNorm on. Can have arbitrary leading
-            dimensions.
-
-    Returns:
-        Float[Tensor,"... d_model"]: Tensor of with the same shape as `in_features` with the output of running
-        RMSNorm of the `in_features`.
     """
+        给定 RMSNorm 仿射变换的权重，返回在输入特征上运行 RMSNorm 的输出。
+
+        参数:
+            d_model (int): RMSNorm 输入的维度
+            eps (float): 添加到分母以保证数值稳定性的值
+            weights (Float[Tensor, "d_model"]): RMSNorm 权重（可学习的缩放参数 γ）
+            in_features (Float[Tensor, "... d_model"]): 要运行 RMSNorm 的输入特征。
+                可以有任意的前导维度。
+
+        返回:
+            Float[Tensor, "... d_model"]: 与 `in_features` 形状相同的张量，
+                包含对 `in_features` 运行 RMSNorm 后的输出。
+        """
+    norm = RMSNorm(d_model,eps=eps)
+    norm.weight.data = weights
+    return norm(in_features)
+
     raise NotImplementedError
 
 
 def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
-    """Given a tensor of inputs, return the output of applying SiLU
-    to each element.
-
-    Args:
-        in_features(Float[Tensor, "..."]): Input features to run SiLU on. Shape is arbitrary.
-
-    Returns:
-        Float[Tensor,"..."]: of with the same shape as `in_features` with the output of applying
-        SiLU to each element.
     """
+    给定输入张量，返回对每个元素应用 SiLU 后的输出。
+
+    参数:
+        in_features (Float[Tensor, "..."]): 要运行 SiLU 的输入特征。形状任意。
+
+    返回:
+        Float[Tensor, "..."]: 与 `in_features` 形状相同的张量，
+            包含对每个元素应用 SiLU 后的输出。
+    """
+    return F.silu(in_features)
     raise NotImplementedError
 
 
@@ -422,17 +527,19 @@ def run_get_batch(
 
 def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, " ..."]:
     """
-    Given a tensor of inputs, return the output of softmaxing the given `dim`
-    of the input.
+        给定输入张量，返回对输入指定 `dim` 维度进行 softmax 后的输出。
 
-    Args:
-        in_features (Float[Tensor, "..."]): Input features to softmax. Shape is arbitrary.
-        dim (int): Dimension of the `in_features` to apply softmax to.
+        参数:
+            in_features (Float[Tensor, "..."]): 要进行 softmax 的输入特征。形状任意。
+            dim (int): 要对 `in_features` 应用 softmax 的维度。
 
-    Returns:
-        Float[Tensor, "..."]: Tensor of with the same shape as `in_features` with the output of
-        softmax normalizing the specified `dim`.
-    """
+        返回:
+            Float[Tensor, "..."]: 与 `in_features` 形状相同的张量，
+                包含对指定 `dim` 进行 softmax 归一化后的输出。
+        """
+
+
+    return softmax(in_features, dim)
     raise NotImplementedError
 
 
