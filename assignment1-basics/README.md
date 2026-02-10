@@ -93,3 +93,8 @@ pytest tests/test_train_bpe.py -v
 pytest tests/test_tokenizer.py -v
 # 测试model部分
 pytest tests/test_model.py -v
+# 测试nn_utils部分
+pytest tests/test_nn_utils.py -v
+# 测试优化器部分
+pytest tests/test_optimizer.py -v
+# c测试

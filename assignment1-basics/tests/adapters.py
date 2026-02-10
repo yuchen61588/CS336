@@ -23,6 +23,7 @@ from cs336_basics.model import (
     RMSNorm
 )
 from cs336_basics.model_function import scaled_dot_product_attention, softmax
+from cs336_basics.training_tools import cross_entropy,AdamW,gradient_clipping,get_lr_cosine_schedule
 import torch.nn.functional as F
 def run_linear(
     d_in: int,
@@ -558,6 +559,7 @@ def run_cross_entropy(
     Returns:
         Float[Tensor, ""]: The average cross-entropy loss across examples.
     """
+    return cross_entropy(inputs,targets)
     raise NotImplementedError
 
 
@@ -570,6 +572,7 @@ def run_gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm:
 
     The gradients of the parameters (parameter.grad) should be modified in-place.
     """
+    return gradient_clipping(parameters,max_l2_norm)
     raise NotImplementedError
 
 
@@ -577,6 +580,7 @@ def get_adamw_cls() -> Any:
     """
     Returns a torch.optim.Optimizer that implements AdamW.
     """
+    return AdamW
     raise NotImplementedError
 
 
@@ -588,23 +592,20 @@ def run_get_lr_cosine_schedule(
     cosine_cycle_iters: int,
 ):
     """
-    Given the parameters of a cosine learning rate decay schedule (with linear
-    warmup) and an iteration number, return the learning rate at the given
-    iteration under the specified schedule.
+    根据余弦学习率衰减调度（带线性预热）的参数和迭代次数，返回指定迭代次数下的学习率。
 
-    Args:
-        it (int): Iteration number to get learning rate for.
-        max_learning_rate (float): alpha_max, the maximum learning rate for
-            cosine learning rate schedule (with warmup).
-        min_learning_rate (float): alpha_min, the minimum / final learning rate for
-            the cosine learning rate schedule (with warmup).
-        warmup_iters (int): T_w, the number of iterations to linearly warm-up
-            the learning rate.
-        cosine_cycle_iters (int): T_c, the number of cosine annealing iterations.
+    参数:
+        it (int): 要获取学习率的迭代次数。
+        max_learning_rate (float): alpha_max，余弦学习率调度（带预热）的最大学习率。
+        min_learning_rate (float): alpha_min，余弦学习率调度（带预热）的最小/最终学习率。
+        warmup_iters (int): T_w，线性预热学习率的迭代次数。
+        cosine_cycle_iters (int): T_c，余弦退火的迭代次数。
 
-    Returns:
-        Learning rate at the given iteration under the specified schedule.
+    返回:
+        指定调度下给定迭代次数的学习率。
     """
+    return get_lr_cosine_schedule(it,max_learning_rate,min_learning_rate,warmup_iters,cosine_cycle_iters)
+
     raise NotImplementedError
 
 

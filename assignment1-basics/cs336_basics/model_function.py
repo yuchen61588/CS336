@@ -23,7 +23,7 @@ def softmax(tensor: torch.Tensor, dim: int)-> torch.Tensor:
     exp_x = torch.exp(x_safe)
 
     # 总维度
-    sum_exp_x = torch.sum(dim=dim,keepdim=True)
+    sum_exp_x = torch.sum(exp_x,dim=dim,keepdim=True)
 
     return exp_x/sum_exp_x
 
