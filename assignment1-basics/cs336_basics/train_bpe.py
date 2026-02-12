@@ -11,6 +11,7 @@ import mmap
 from collections import Counter
 
 from cs336_basics.bpe_data_structures import WordObject, InvertedIndex, FrequencyBuckets
+import time
 
 # GPT-2 使用的预分词正则：用于将文本切分为基础单词块，防止跨单词合并
 GPT2_SPLIT_PATTERN = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
@@ -171,6 +172,7 @@ def train_bpe(
         worker_args.append((str(input_path), start, end, GPT2_SPLIT_PATTERN, special_tokens))
 
     print(f"启动 {num_procs} 个 Worker 进行流式预分词...")
+    start_time = time.time()
     global_freqs = defaultdict(int)
 
     total_chunks = len(worker_args)
@@ -187,6 +189,9 @@ def train_bpe(
 
                 # 【修改点 3】：每处理完一个 Worker 的返回结果，更新一次进度
                 pbar.update(1)
+    end_time = time.time()
+    print(f"预分词时间为{end_time-start_time}")
+
 
     # --- 第二阶段：初始化 BPE 数据结构 ---
     train_words: List[WordObject] = []  # 词表
@@ -199,6 +204,7 @@ def train_bpe(
     sorted_pretokens = sorted(global_freqs.items(), key=lambda x: x[0])
 
     print("正在构建倒排索引和频率桶...")
+    start_time = time.time()
     for idx, (b_seq, count) in enumerate(sorted_pretokens):
         tokens = list(b_seq)
         word_obj = WordObject(tokens, count, b_seq)
@@ -269,11 +275,6 @@ def train_bpe(
 
             next_token_id += 1
             pbar.update(1)
-
+    end_time = time.time()
+    print(f"分词时间为{end_time-start_time}")
     return vocab, merges
-
-
-
-
-
-

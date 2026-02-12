@@ -8,6 +8,8 @@ import multiprocessing
 import tqdm
 from functools import partial
 from typing import List, Dict, Tuple, Optional, Iterable, Iterator,Union
+import time
+from cs336_basics.train_bpe import _get_chunk_boundaries
 
 GPT2_SPLIT_PATTERN = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 # -----------------------------------------------------------------------------
@@ -25,11 +27,45 @@ def _worker_initializer(serialized_vocab: Dict[int, List[int]],
     global _worker_tokenizer
     # 重建 Vocab (List[int] -> bytes)
     vocab = {k: bytes(v) for k, v in serialized_vocab.items()} #比 bytes更好序列化
-    _worker_tokenizer = Tokenizer(vocab, merges_list, special_tokens)
+    _worker_tokenizer = Tokenizer(100000,vocab, merges_list, special_tokens)
 
-def _worker_encode(text: str) -> List[int]:
-    """子进程实际执行的编码任务"""
+# =============================================================================
+# 新增：专门处理文件的 Worker
+# =============================================================================
+def _worker_encode_from_file(args) -> Tuple[List[int], int]:
+    """
+    Worker 变体：接收 (文件路径, start, end)，读取文本后调用原有的 encode。
+    """
+    path, start, end = args
+    
+    # 1. 使用 seek + read 读取指定片段 (利用 OS Cache，速度极快)
+    # 这里不需要再用 mmap 对象，直接文件 IO 即可，因为边界已经算好了
+    with open(path, 'rb') as f:
+        f.seek(start)
+        chunk_bytes = f.read(end - start)
+    
+    # 2. 处理换行符和解码
+    if b'\r\n' in chunk_bytes:
+        chunk_bytes = chunk_bytes.replace(b'\r\n', b'\n')
+    
+    # decode 会得到原本的大段文本
+    text_chunk = chunk_bytes.decode('utf-8', errors='replace')
+
+    # encode 内部会做：Special Token隔离 -> 正则切分 -> BPE合并
+    ids = _worker_tokenizer.encode(text_chunk)
+    
+    # 返回 ids 和 字节数(用于进度条)
+    return ids, len(chunk_bytes)
+
     return _worker_tokenizer.encode(text)
+
+def _worker_encode(text: str) -> Tuple[List[int], int]:
+    """处理内存字符串的 Worker"""
+    # 这里的 _worker_tokenizer 是全局变量
+    ids = _worker_tokenizer.encode(text)
+    # 返回 (ids, 字节长度)
+    return ids, len(text.encode('utf-8'))
+
 class Tokenizer:
     def __init__(self,max_cache: int,vocab:Dict[int,bytes],merge:List[Tuple[bytes,bytes]],special_tokens: List[str] = None, ):
         """
@@ -352,7 +388,7 @@ class Tokenizer:
         # 更新后的 encode_parallel
         # -------------------------------------------------------------------------
 
-    def encode_parallel(self, texts: Union[str, List[str]], num_processes: int = None) -> List[int]:
+    def encode_parallel(self, input_data: Union[str, List[str]], num_processes: int = None) -> List[int]:
         """
                 并行编码接口。
 
@@ -364,19 +400,40 @@ class Tokenizer:
             num_processes = max(1, multiprocessing.cpu_count() - 1)
 
             # --- 1. 类型兼容性与分块策略优化 ---
-        if isinstance(texts, str):
-            print("Input is a single string. Chunking strategies activated...")
-
-            # 策略：将大字符串切分为 核心数 * 4 份
-            # 这样既能充分利用多核，又不会因为任务太碎导致通信阻塞
+        if isinstance(input_data, str) and os.path.exists(input_data):
+            file_path = input_data
+            file_size = os.path.getsize(file_path)
+            print(f"🚀 Detected file input: {file_path} ({file_size / (1024**3):.2f} GB)")
+            
+            # 1. 调用你提供的边界计算函数 (完美复用)
+            # 注意：要传入 self.special_tokens 以防止切断特殊 token
             target_chunks = num_processes * 4
-            texts = self._chunk_string(texts, target_chunks)
+            print(" -> Calculating chunk boundaries (mmap)...")
+            boundaries = _get_chunk_boundaries(file_path, target_chunks, self.special_tokens)
+            
+            # 2. 构造 Worker 参数: (path, start, end)
+            worker_args = [(file_path, start, end) for start, end in boundaries]
+            
+            # 3. 指定 Worker 函数
+            target_worker = _worker_encode_from_file
+            total_work_units = file_size # 进度条总量
 
-            if not texts:
-                return []
-            print(f"-> Split into {len(texts)} large chunks (preserving '\\n').")
+        # =====================================================================
+        # 分支 B: 输入是内存字符串列表 -> 走旧逻辑
+        # =====================================================================
+        else:
+            print("🚀 Detected memory input (List[str]).")
+            texts = input_data
+            if isinstance(texts, str): # 单个大字符串兜底
+                 texts = self._chunk_string(texts, num_processes * 4)
+            
+            worker_args = texts
+            target_worker = _worker_encode # 原来的 worker
+            total_work_units = sum(len(t.encode('utf-8')) for t in worker_args) # 估算大小
+        
 
-        print(f"Parallel encoding {len(texts)} chunks with {num_processes} processes...")
+
+        print(f" -> Starting multiprocessing pool with {num_processes} workers...")
         # 2. 序列化必要数据 (Lightweight Serialization)
         # vocab: 转为 {int: list[int]}，体积更小且兼容 pickle
         serialized_vocab = {k: list(v) for k, v in self.vocab.items()}
@@ -385,25 +442,47 @@ class Tokenizer:
         for pair, rank in self.ranks.items():
             merges_list[rank] = pair
          # 3. 启动进程池
+        start_time = time.time()
+        final_ids = []
+        processed_bytes = 0
+        total_tokens = 0
         with multiprocessing.Pool(
                 processes=num_processes,
                 initializer=_worker_initializer,
                 initargs=(serialized_vocab, merges_list, self.special_tokens)
         ) as pool:
 
-            # 计算 chunksize
-            chunk_size = max(1, len(texts) // (num_processes * 4))
-            results = []
+           # 使用 imap
+            cursor = pool.imap(target_worker, worker_args, chunksize=1)
+            
+            with tqdm.tqdm(total=total_work_units, unit='B', unit_scale=True, desc="Tokenizing") as pbar:
+                for chunk_ids, chunk_len in cursor: # 接收 (ids, byte_len)
+                    final_ids.extend(chunk_ids)
+                    
+                    processed_bytes += chunk_len
+                    total_tokens += len(chunk_ids)
+                    pbar.update(chunk_len)
+                    
+                    # 你的速度显示逻辑 (保持原样)
+                    elapsed = time.time() - start_time
+                    if elapsed > 0:
+                        # 计算原始速度
+                        tokens_per_sec =  total_tokens / elapsed
+            
+                        # 格式化显示 (M tok/s 或 k tok/s)
+                        if tokens_per_sec > 1_000_000:
+                            speed_str = f"{tokens_per_sec / 1_000_000:.2f}M tok/s"
+                        elif tokens_per_sec > 1_000:
+                            speed_str = f"{tokens_per_sec / 1_000:.2f}k tok/s"
+                        else:
+                             speed_str = f"{tokens_per_sec:.2f} tok/s"
+                        
+                        pbar.set_postfix(
+                    speed=speed_str, 
+                    # ratio=f"{bytes_per_token:.2f} bytes/tok" # 可选
+                )
 
-            # 使用 imap 保证结果顺序
-            for res in tqdm.tqdm(
-                    pool.imap(_worker_encode, texts, chunksize=chunk_size),
-                    total=len(texts),
-                    desc="Encoding"
-            ):
-                results.extend(res)
-
-        return results
+        return final_ids
 
 
 

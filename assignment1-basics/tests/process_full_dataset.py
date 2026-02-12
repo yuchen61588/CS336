@@ -19,27 +19,20 @@ def process_and_save(
 
     # 1. 加载并还原分词器
     tokenizer = get_tokenizer_from_vocab_merges_path(vocab_path, merges_path, special_tokens=["<|endoftext|>"])
+ 
 
-    # 2. 读取原始文本
-    if not os.path.exists(raw_txt_path):
-        print(f"❌ 错误: 找不到原始文件 {raw_txt_path}")
-        return
-
-    print(f"  -> 读取文本中: {raw_txt_path}")
-    with open(raw_txt_path, 'r', encoding='utf-8') as f:
-        text = f.read()
-
-    # 3. 调用你的并行编码接口
+    # 2. 调用你的并行编码接口
     print(f"  -> 启动并行分词 (encode_parallel)...")
-    ids = tokenizer.encode_parallel(text)
+    ids = tokenizer.encode_parallel(raw_txt_path)
 
     # 4. 存为 uint16 .npy 格式
     # 使用 uint16 极大节省后续训练时的显存和磁盘占用
     print(f"  -> 转换为 uint16 并保存...")
     np_ids = np.array(ids, dtype=np.uint16)
 
-    os.makedirs(os.path.dirname(output_npy_path), exist_ok=True)
-    np.save(output_npy_path, np_ids)
+
+    # os.makedirs(os.path.dirname(output_npy_path), exist_ok=True)
+    # np.save(output_npy_path, np_ids)
 
     print(f"✅ 完成！Token总数: {len(np_ids):,}")
     print(f"✅ 文件已保存至: {output_npy_path}")

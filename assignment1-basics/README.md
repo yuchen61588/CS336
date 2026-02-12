@@ -99,5 +99,7 @@ pytest tests/test_nn_utils.py -v
 pytest tests/test_optimizer.py -v
 # 测试断点保存
 pytest tests/test_serialization.py -v
-# 测试get_batch
+# 测试get_batchv
 pytest tests/test_data.py -v
+# 测试推理分词
+python tests/process_full_dataset.py -v

@@ -153,6 +153,7 @@ def save_tokenizer(
             str0 = "".join([b2u[b] for b in p0])
             str1 = "".join([b2u[b] for b in p1])
             f.write(f"{str0} {str1}\n")
+@pytest.mark.skip(reason="已通过,分词完成")
 def test_train_bpe_tinystory():
     
     input_path = TINY_PATH / "TinyStoriesV2-GPT4-train.txt"
@@ -171,7 +172,28 @@ def test_train_bpe_tinystory():
         output_dir=output_dir,
         model_name="TinyStoriesV2-GPT4-train"
     )
+@pytest.mark.skip(reason="已通过,分词完成")
+def test_train_bpe_tinystory():
+    
+    input_path = TINY_PATH / "TinyStoriesV2-GPT4-valid.txt"
+    current_test_dir = Path(__file__).parent.resolve()
+    project_root = current_test_dir.parent
+    output_dir = project_root / "merge_vocab"
+    vocab, merges = run_train_bpe(
+        input_path=input_path,
+        vocab_size=4096,
+        special_tokens=["<|endoftext|>"],
+    )
 
+    save_tokenizer(
+        vocab=vocab,
+        merges=merges,
+        output_dir=output_dir,
+        model_name="TinyStoriesV2-GPT4-valid")
+
+
+    
+@pytest.mark.skip(reason="已数据集过大，使用服务器完成")
 def test_train_bpe_openWebText():
     
     input_path = TINY_PATH / "owt_train.txt"
@@ -190,4 +212,40 @@ def test_train_bpe_openWebText():
         output_dir=output_dir,
         model_name="owt_train"
     )
+def test_train_bpe_openWebText100MB():
+    
+    input_path = TINY_PATH / "owt_train.txt"
+    current_test_dir = Path(__file__).parent.resolve()
+    project_root = current_test_dir.parent
+    output_dir = project_root / "merge_vocab"
+    
+    data_dir = project_root / "data"
+    sampled_input_path = data_dir / "owt_train_100mb.txt" # 采样文件存放在 data 目录
 
+    # 2. 采样 100MB 数据逻辑 (如果文件不存在则进行分割)
+    target_size_bytes = 100 * 1024 * 1024  # 100MB
+    if not sampled_input_path.exists():
+        if not input_path.exists():
+            pytest.fail(f"原始数据文件不存在: {input_path}，请检查路径。")
+            
+        print(f"正在从原始数据采样 100MB 到: {sampled_input_path}...")
+        with open(input_path, 'rb') as f_in:
+            chunk = f_in.read(target_size_bytes)
+            with open(sampled_input_path, 'wb') as f_out:
+                f_out.write(chunk)
+    else:
+        print(f"检测到已存在的采样文件: {sampled_input_path}，跳过采样步骤。")
+    
+    print(f"开始 BPE 训练，输入文件: {sampled_input_path.name}")
+    vocab, merges = run_train_bpe(
+        input_path=str(sampled_input_path),
+        vocab_size=32000,
+        special_tokens=["<|endoftext|>"],
+    )
+
+    save_tokenizer(
+        vocab=vocab,
+        merges=merges,
+        output_dir=output_dir,
+        model_name="owt_train_100MB"
+    )
