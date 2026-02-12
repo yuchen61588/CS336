@@ -26,7 +26,7 @@ def _worker_initializer(serialized_vocab: Dict[int, List[int]],
     """
     global _worker_tokenizer
     # 重建 Vocab (List[int] -> bytes)
-    vocab = {k: bytes(v) for k, v in serialized_vocab.items()} #比 bytes更好序列化
+    vocab = serialized_vocab
     _worker_tokenizer = Tokenizer(100000,vocab, merges_list, special_tokens)
 
 # =============================================================================
@@ -436,7 +436,7 @@ class Tokenizer:
         print(f" -> Starting multiprocessing pool with {num_processes} workers...")
         # 2. 序列化必要数据 (Lightweight Serialization)
         # vocab: 转为 {int: list[int]}，体积更小且兼容 pickle
-        serialized_vocab = {k: list(v) for k, v in self.vocab.items()}
+        serialized_vocab = self.vocab
         # merges: 重建为有序列表，因为 ranks 字典是无序的
         merges_list = [None] * len(self.ranks) #反向查 ，使用数字索引，开销小。
         for pair, rank in self.ranks.items():

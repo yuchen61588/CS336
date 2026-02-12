@@ -103,3 +103,5 @@ pytest tests/test_serialization.py -v
 pytest tests/test_data.py -v
 # 测试推理分词
 python tests/process_full_dataset.py -v
+# 测试并行化正确性
+python tests/text_tokenizer_mul.py -v

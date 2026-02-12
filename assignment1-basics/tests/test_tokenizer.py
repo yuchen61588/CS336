@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-# import resource
+import resource
 import sys
 
 import psutil
@@ -470,3 +470,4 @@ def _encode(tokenizer, text):
     for just this function. We set the memory limit to 1MB.
     """
     return tokenizer.encode(text)
+
