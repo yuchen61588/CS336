@@ -5,7 +5,10 @@ from .adapters import run_train_bpe
 from .common import FIXTURES_PATH,TINY_PATH, gpt2_bytes_to_unicode
 from pathlib import Path
 from typing import List, Tuple, Dict, Optional, Any
+from tests.common import gpt2_bytes_to_unicode
 import os
+
+
 def test_train_bpe_speed():
     """
     Ensure that BPE training is relatively efficient by measuring training
@@ -32,7 +35,7 @@ def test_train_bpe():
     input_path = FIXTURES_PATH / "corpus.en"
     current_test_dir = Path(__file__).parent.resolve()
     project_root = current_test_dir.parent
-    output_dir = project_root / "output"
+    output_dir = project_root / "merge_vocab"
     vocab, merges = run_train_bpe(
         input_path=input_path,
         vocab_size=500,
@@ -116,37 +119,40 @@ def test_train_bpe_special_tokens(snapshot):
 def save_tokenizer(
     vocab: Dict[int, bytes],
     merges: List[Tuple[bytes, bytes]],
-    output_dir: str,  # 变化1：指定目录
-    model_name: str  # 变化2：指定模型名字（区分实验结果）
+    output_dir: str,
+    model_name: str
 ) -> None:
     """
-    持久化保存 BPE 分词器
-    会自动生成:
-      - output_dir/model_name_vocab.json
-      - output_dir/model_name_merges.txt
+    持久化保存 BPE 分词器 (转换为你想要的 GPT-2 字符串格式)
     """
-    # 1. 自动创建目录（如果不存在）
-    # 这一步非常重要，防止因为文件夹不存在而报错
     os.makedirs(output_dir, exist_ok=True)
-
-    # 2. 拼接完整的文件路径前缀
-    # 例如: output/run_v1
     file_prefix = os.path.join(output_dir, model_name)
 
-    # 3. 保存 Vocab
-    vocab_export = {k: list(v) for k, v in vocab.items()}
-    vocab_path = f"{file_prefix}_vocab.json"
-    print(f"Saving vocab to: {vocab_path}") # 增加一点日志
-    with open(vocab_path, "w") as f:
-        json.dump(vocab_export, f)
+    # 1. 获取字节到 Unicode 的映射字典
+    b2u = gpt2_bytes_to_unicode()
 
-    # 4. 保存 Merges
+    # 2. 保存 Vocab: 格式为 {"Ġt": 123, "a": 64, ...}
+    vocab_export = {}
+    for token_id, token_bytes in vocab.items():
+        # 将每个 byte 映射为对应的 unicode 字符并拼接为字符串
+        token_str = "".join([b2u[b] for b in token_bytes])
+        vocab_export[token_str] = token_id
+
+    vocab_path = f"{file_prefix}_vocab.json"
+    print(f"Saving vocab to: {vocab_path}")
+    with open(vocab_path, "w", encoding="utf-8") as f:
+        # ensure_ascii=False 确保直接输出 Ġ 这类字符而不是 \uXXXX
+        json.dump(vocab_export, f, ensure_ascii=False)
+
+    # 3. 保存 Merges: 格式为 "Ġ t\n"
     merges_path = f"{file_prefix}_merges.txt"
     print(f"Saving merges to: {merges_path}")
     with open(merges_path, "w", encoding="utf-8") as f:
         for p0, p1 in merges:
-            f.write(f"{list(p0)} {list(p1)}\n")
-def test_train_bpe_speed2():
+            str0 = "".join([b2u[b] for b in p0])
+            str1 = "".join([b2u[b] for b in p1])
+            f.write(f"{str0} {str1}\n")
+def test_train_bpe_tinystory():
     """
     Ensure that BPE training is relatively efficient by measuring training
     time on this small dataset and throwing an error if it takes more than 1.5 seconds.
@@ -157,12 +163,46 @@ def test_train_bpe_speed2():
     1.5 秒是相当宽松的上限——参考实现在我笔记本上只需 0.38 秒；而玩具级实现大约要 3 秒。
     """
     input_path = TINY_PATH / "TinyStoriesV2-GPT4-train.txt"
-    start_time = time.time()
-    _, _ = run_train_bpe(
+    current_test_dir = Path(__file__).parent.resolve()
+    project_root = current_test_dir.parent
+    output_dir = project_root / "merge_vocab"
+    vocab, merges = run_train_bpe(
         input_path=input_path,
         vocab_size=10000,
         special_tokens=["<|endoftext|>"],
     )
-    end_time = time.time()
-    print(end_time - start_time)
-    assert end_time - start_time < 200
+
+    save_tokenizer(
+        vocab=vocab,
+        merges=merges,
+        output_dir=output_dir,
+        model_name="TinyStoriesV2-GPT4-train"
+    )
+
+def test_train_bpe_openWebText():
+    """
+    Ensure that BPE training is relatively efficient by measuring training
+    time on this small dataset and throwing an error if it takes more than 1.5 seconds.
+    This is a pretty generous upper-bound, it takes 0.38 seconds with the
+    reference implementation on my laptop. In contrast, the toy implementation
+    takes around 3 seconds.
+    确保 BPE 训练相对高效：在这个小数据集上测量训练时间，若耗时超过 1.5 秒就抛出错误。
+    1.5 秒是相当宽松的上限——参考实现在我笔记本上只需 0.38 秒；而玩具级实现大约要 3 秒。
+    """
+    input_path = TINY_PATH / "owt_train.txt"
+    current_test_dir = Path(__file__).parent.resolve()
+    project_root = current_test_dir.parent
+    output_dir = project_root / "merge_vocab"
+    vocab, merges = run_train_bpe(
+        input_path=input_path,
+        vocab_size=10000,
+        special_tokens=["<|endoftext|>"],
+    )
+
+    save_tokenizer(
+        vocab=vocab,
+        merges=merges,
+        output_dir=output_dir,
+        model_name="owt_train"
+    )
+

@@ -51,6 +51,8 @@ RMSNorm
 
 RMSNorm **去掉了减均值的步骤**，直接除以均方根（RMS）。这使得计算更简单、速度更快，效果通常与 LayerNorm 相当甚至更好。
 
+RMSNorm同样在最后没有偏置项，传统的layerNoem是有偏置项的，在前面整体项后面有一个偏置项$\beta$，而RMS的是没有的。
+
 给定一个输入向量 $a \in \mathbb{R}^{d_{model}}$
 
 **计算 RMS**：
@@ -248,3 +250,12 @@ $$
 2. 由于他要给所有的词表生成概率，所以要把**d_model变成vocab_size**，让他能够打分。
 3. 语言模型将整数标记为id标记序列，从(batch_size, sequence_length)转到(batch_size, sequence_length, vocab_size)
 
+
+
+### 权重绑定
+
+简单来说，它强制让 **“输入嵌入层（Token Embeddings）”** 和 **“输出投影层（LM Head / Output Linear）”** 使用**完全相同**的权重矩阵。
+
+可以大幅度减少参数量。
+
+输出输出权重矩阵一致，可以让输出效果更好。

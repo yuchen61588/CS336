@@ -1,0 +1,57 @@
+# 统一的项目名称，保证所有模型都在同一个 WandB 项目面板中
+project_name: "cs336-transformer-ablation"
+
+# === 公共配置：所有模型都共享的参数 ===
+common:
+  data:
+    train_path: "data/TinyStories_train.npy"
+    val_path: "data/TinyStories_val.npy"
+  training:
+    device: "cuda"
+    batch_size: 64
+    max_iters: 40000
+    learning_rate: 3e-4
+    min_lr: 3e-5
+    warmup_iters: 1000
+    weight_decay: 0.1
+    beta1: 0.9
+    beta2: 0.95
+    eps: 1e-8
+    grad_clip: 1.0
+  checkpoint:
+    out_dir_base: "checkpoints"
+    save_interval: 5000
+
+# === 实验列表：代码会按顺序把这里的模型全部跑一遍 ===
+experiments:
+  # 实验 1：Llama 架构
+  - run_name: "llama-struct"
+    model:
+      vocab_size: 10000
+      context_length: 256
+      d_model: 256
+      num_layers: 4
+      num_heads: 4
+      d_ff: 688
+      rope_theta: 10000.0
+      norm_location: "pre"
+      norm_type: "rmsnorm"
+      ffn_type: "swiglu"
+      use_rope: true
+      weight_tying: true
+
+  # 实验 2：原始 Transformer 架构
+  - run_name: "original-struct"
+    model:
+      vocab_size: 10000
+      context_length: 256
+      d_model: 256
+      num_layers: 4
+      num_heads: 4
+      d_ff: 1024
+      rope_theta: 10000.0
+      norm_location: "post"
+      norm_type: "layernorm"
+      ffn_type: "relu"
+      use_rope: false
+      weight_tying: true

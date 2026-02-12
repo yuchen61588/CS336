@@ -97,4 +97,7 @@ pytest tests/test_model.py -v
 pytest tests/test_nn_utils.py -v
 # 测试优化器部分
 pytest tests/test_optimizer.py -v
-# c测试
+# 测试断点保存
+pytest tests/test_serialization.py -v
+# 测试get_batch
+pytest tests/test_data.py -v

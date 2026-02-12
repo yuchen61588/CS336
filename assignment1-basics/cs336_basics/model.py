@@ -112,6 +112,38 @@ class RMSNorm(nn.Module):
 
         return x.to(input_dtype)
 
+# 标准化layNorm 器最大特点就是需要减去均值u，RMS没有这个步骤
+
+class LayerNorm(nn.Module):
+    """
+    Standard Layer Normalization (用于原始 Transformer 架构)
+    公式: y = ((x - mean) / sqrt(var + eps)) * gamma + beta
+    """
+
+    def __init__(self, d_model: int, eps: float = 1e-5, device=None, dtype=None):
+        super().__init__()
+        self.eps = eps
+        factory_kwargs = {'device': device, 'dtype': dtype}
+
+        # Learnable parameters: Gamma (weight) and Beta (bias)
+        self.weight = nn.Parameter(torch.ones(d_model, **factory_kwargs))
+        self.bias = nn.Parameter(torch.zeros(d_model, **factory_kwargs))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x shape: (batch, seq_len, d_model)
+        # 计算均值 (Mean)
+        mean = x.mean(dim=-1, keepdim=True)
+
+        # 计算方差 (Variance) - 使用无偏估计或总体方差均可，通常 LayerNorm 使用简单的 mean((x-mu)^2)
+        # 这里为了数值稳定性，通常写作 x.var(dim=-1, keepdim=True, unbiased=False)
+        var = ((x - mean) ** 2).mean(dim=-1, keepdim=True)
+
+        # 归一化
+        x_norm = (x - mean) / torch.sqrt(var + self.eps)
+
+        # 应用仿射变换 (Affine Transform)
+        return x_norm * self.weight + self.bias
+
 class SwiGLUFeedForward(nn.Module):
     def __init__(self,
                  d_model: int,
@@ -154,6 +186,20 @@ class SwiGLUFeedForward(nn.Module):
 
         hidden = silu_out*w3_out
         return self.w2(hidden)
+
+# 标准化前馈网络，使用全连接层+relu +dropout+全连接层的配比方式
+class StandardFeedForward(nn.Module):
+    def __init__(self, d_model: int, d_ff: int, dropout: float = 0.0, device=None, dtype=None):
+        super().__init__()
+        # Original Transformer: d_ff = 4 * d_model [cite: 625]
+        self.w1 = Linear(d_model, d_ff, device=device, dtype=dtype)
+        self.w2 = Linear(d_ff, d_model, device=device, dtype=dtype)
+        self.relu = nn.ReLU()
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # FFN(x) = ReLU(xW1)W2
+        return self.w2(self.dropout(self.relu(self.w1(x))))
 
 
 class ROPE(nn.Module):
@@ -295,6 +341,7 @@ class Transformer_block(nn.Module):
                  d_model:int,
                  num_heads:int,
                  d_ff:int,
+                 config: dict,  # 传入配置字典
                  device: torch.device | None = None,
                  dtype: torch.dtype | None = None
                  ):
@@ -307,17 +354,36 @@ class Transformer_block(nn.Module):
                 d_ff: FFN 隐藏层维度 (注意：你之前的 SwiGLUFeedForward 是内部计算 hidden_dim 的，
                         如果需要严格使用这个 d_ff，你需要修改 SwiGLUFeedForward 的 __init__ 来接收它。
                         这里我暂时按照标准的 SwiGLU 逻辑，传入 d_model)
+            # 注意，为了实现消融实验，我们传入了config字典，便于配置的调整
             """
         super().__init__()
-        # 1. 第一个子层: MHA
-        # 顺序: RMSNorm -> MHA -> Residual Add
-        self.rms_norm1 = RMSNorm(d_model,device=device,dtype=dtype)
+        self.norm_location = config.get('norm_location', 'pre')  # 'pre' or 'post'
+        norm_type = config.get('norm_type', 'rmsnorm')  # 'rmsnorm' or 'layernorm'
+        ffn_type = config.get('ffn_type', 'swiglu')  # 'swiglu' or 'relu'
+        dropout = config.get('dropout', 0.0)
+
+        NormClass = RMSNorm if norm_type == 'rmsnorm' else nn.LayerNorm
+
+        # 对于 nn.LayerNorm，PyTorch 原生实现需要 eps 参数
+        if norm_type == 'layernorm':
+            # 1. 第一个子层: MHA
+            # 顺序: RMSNorm -> MHA -> Residual Add
+            self.norm1 = NormClass(d_model, eps=1e-5, device=device, dtype=dtype)
+            # 2. 第二个子层: FFN
+            # 顺序: RMSNorm -> FFN -> Residual Add
+            self.norm2 = NormClass(d_model, eps=1e-5, device=device, dtype=dtype)
+        else:
+            self.norm1 = NormClass(d_model, device=device, dtype=dtype)
+            self.norm2 = NormClass(d_model, device=device, dtype=dtype)
+
         self.mha = CausalMultiHeadSelfAttention(d_model,num_heads,device=device,dtype=dtype)
 
-        # 2. 第二个子层: FFN
-        # 顺序: RMSNorm -> FFN -> Residual Add
-        self.rms_norm2 = RMSNorm(d_model,device=device,dtype=dtype)
-        self.ffn = SwiGLUFeedForward(d_model,d_ff,device=device,dtype=dtype)
+        # 工厂模式：选择 FFN
+        if ffn_type == 'swiglu':
+            self.ffn = SwiGLUFeedForward(d_model, d_ff, device=device, dtype=dtype)
+        else:
+            # 如果是 Standard/Original，d_ff 通常是 4倍
+            self.ffn = StandardFeedForward(d_model, d_ff, dropout, device=device, dtype=dtype)
     def forward(self,x:torch.Tensor,rope_embed:nn.Module)->torch.Tensor:
         """
             Args:
@@ -327,16 +393,27 @@ class Transformer_block(nn.Module):
         # 子层 1: MHA
         # y = x + MultiHeadSelfAttention(RMSNorm(x))
         # 注意：MHA 需要接收 rope_embed
-        norm_x = self.rms_norm1(x)
-        attn_out = self.mha(norm_x,rope_embed=rope_embed)
-        x = x + attn_out
-        # 子层 2: FFN
-        # 类似于: z = y + FFN(RMSNorm(y))
-        norm_y = self.rms_norm2(x)
-        ffn_out = self.ffn(norm_y)
-        x = x +  ffn_out
+        # 注意，下面有两种模式，一种正常模式，一种llama模式，根据配置文件来
+
+        # Pre-Norm (Llama/Modern)
+        if self.norm_location =='pre':
+            x = x + self.mha(self.norm1(x), rope_embed=rope_embed)
+            x = x+self.ffn(self.norm2(x))
+
+        # Post-Norm (Original/Vaswani)
+
+        else:
+            # Sublayer 1: Attention
+            # 注意：Post-Norm 中，RoPE 应用在 Attention 内部，但 Norm 在残差之后
+            norm_input = x+ self.mha(x,rope_embed=rope_embed)
+            x =self.norm1(norm_input)
+
+            norm_input = x+self.ffn(x)
+            x =self.norm2(norm_input)
 
         return x
+
+
 
 class TransformerLM(nn.Module):
     def __init__(self,
@@ -347,6 +424,7 @@ class TransformerLM(nn.Module):
                  num_heads:int,
                  d_ff:int,
                  rope_theta: float,
+                 config: dict,  # 接收完整配置
                  device: torch.device | None = None,
                  dtype: torch.dtype | None = None
                  ):
@@ -368,35 +446,59 @@ class TransformerLM(nn.Module):
             device=device,
             dtype=dtype
         )
-        # 2. 初始化 RoPE
-        # RoPE 只需要初始化一次，然后在所有层之间共享
-        # d_k = d_model / num_heads
-        d_k = d_model//num_heads
-        self.rope = ROPE(
-            theta=rope_theta,
-            d_k=d_k,
-            max_seq_len=context_length,
-            device=device
-        )
+        # 位置编码选择
+        self.use_rope = config.get('use_rope', True)
+        self.learned_pos_embed = None
+
+        if not self.use_rope:
+            # Original Transformer 使用绝对位置编码 (Learned Absolute PE)
+            self.learned_pos_embed = nn.Parameter(torch.zeros(1, context_length, d_model, device=device, dtype=dtype))
+            nn.init.trunc_normal_(self.learned_pos_embed, std=0.02)
+        else:
+            # 2. 初始化 RoPE
+            # RoPE 只需要初始化一次，然后在所有层之间共享
+            # d_k = d_model / num_heads
+            d_k = d_model // num_heads
+            self.rope = ROPE(
+                theta=rope_theta,
+                d_k=d_k,
+                max_seq_len=context_length,
+                device=device
+            )
+
         # 堆叠Transformer Blocks
         self.layers = nn.ModuleList([
             Transformer_block(
                 d_model=d_model,
                 num_heads=num_heads,
                 d_ff=d_ff,
+                config=config,
                 device=device,
                 dtype=dtype
             ) for _ in range(num_layers)
         ])
-        # 输出层
-        # 通常 Transformer 块之后会接一个 Final RMSNorm，然后是输出投影
-        self.final_norm = RMSNorm(d_model, device=device, dtype=dtype)
+        # Final Norm
+        norm_type = config.get('norm_type', 'rmsnorm')
+        NormClass = RMSNorm if norm_type == 'rmsnorm' else nn.LayerNorm
+        if norm_type == 'layernorm':
+            self.final_norm = NormClass(d_model, eps=1e-5, device=device, dtype=dtype)
+        else:
+            self.final_norm = NormClass(d_model, device=device, dtype=dtype)
+
         self.output_head = Linear(
             in_features=d_model,
             out_features=vocab_size,
             device=device,
             dtype=dtype
        )
+        # 核心：权重绑定 (Weight Tying)
+        if config.get('weight_tying', False):
+            # PyTorch 中 Embedding 和 Linear 的权重 shape 都是 (vocab, d_model)
+            # Embedding.weight: (num_embeddings, embedding_dim)
+            # Linear.weight: (out_features, in_features) -> (vocab, d_model)
+            # 所以可以直接赋值共享内存
+            self.output_head.weight = self.embedding.weight
+
     def forward(self,token_ids:torch.Tensor)->torch.Tensor:
         """
             Args:

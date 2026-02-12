@@ -23,7 +23,10 @@ from cs336_basics.model import (
     RMSNorm
 )
 from cs336_basics.model_function import scaled_dot_product_attention, softmax
-from cs336_basics.training_tools import cross_entropy,AdamW,gradient_clipping,get_lr_cosine_schedule
+from cs336_basics.utils import cross_entropy,gradient_clipping,get_lr_cosine_schedule
+from cs336_basics.optimizer import AdamW
+from cs336_basics.data import TextDataLoader
+from cs336_basics.Checkpointing import save_checkpoint,load_checkpoint
 import torch.nn.functional as F
 def run_linear(
     d_in: int,
@@ -507,22 +510,22 @@ def run_get_batch(
     dataset: npt.NDArray, batch_size: int, context_length: int, device: str
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
-    Given a dataset (a 1D numpy array of integers) and a desired batch size and
-    context length, sample language modeling input sequences and their corresponding
-    labels from the dataset.
+    根据给定的数据集（一维整数 numpy 数组）以及期望的批次大小和上下文长度，
+    从数据集中采样语言模型的输入序列及其对应的标签。
 
-    Args:
-        dataset (np.array): 1D numpy array of integer token IDs in the dataset.
-        batch_size (int): Desired batch size to sample.
-        context_length (int): Desired context length of each sampled example.
-        device (str): PyTorch device string (e.g., 'cpu' or 'cuda:0') indicating the device
-            to place the sampled input sequences and labels on.
+    参数:
+        dataset (np.array): 数据集中的一维 numpy 整数数组，表示 token ID。
+        batch_size (int): 期望采样的批次大小。
+        context_length (int): 每个采样样本的期望上下文长度。
+        device (str): PyTorch 设备字符串（例如 'cpu' 或 'cuda:0'），
+            指定采样后的输入序列和标签要放置的计算设备。
 
-    Returns:
-        Tuple of torch.LongTensors of shape (batch_size, context_length). The first tuple item
-        is the sampled input sequences, and the second tuple item is the corresponding
-        language modeling labels.
+    返回:
+        两个 torch.LongTensor 组成的元组，形状均为 (batch_size, context_length)。
+        元组的第一个元素是采样的输入序列，第二个元素是对应的语言模型标签。
     """
+    loader = TextDataLoader(dataset,batch_size,context_length,device)
+    return loader.get_batch()
     raise NotImplementedError
 
 
@@ -616,16 +619,17 @@ def run_save_checkpoint(
     out: str | os.PathLike | BinaryIO | IO[bytes],
 ):
     """
-    Given a model, optimizer, and an iteration number, serialize them to disk.
+    给定一个模型、优化器和迭代次数，将它们序列化保存到磁盘。
 
-    Args:
-        model (torch.nn.Module): Serialize the state of this model.
-        optimizer (torch.optim.Optimizer): Serialize the state of this optimizer.
-        iteration (int): Serialize this value, which represents the number of training iterations
-            we've completed.
-        out (str | os.PathLike | BinaryIO | IO[bytes]): Path or file-like object to serialize the model, optimizer, and iteration to.
+    参数：
+        model (torch.nn.Module): 要序列化状态的模型。
+        optimizer (torch.optim.Optimizer): 要序列化状态的优化器。
+        iteration (int): 要序列化的值，表示我们已完成的训练迭代次数。
+        out (str | os.PathLike | BinaryIO | IO[bytes]): 用于序列化模型、优化器和迭代次数的路径或类文件对象。
     """
-    raise NotImplementedError
+    save_checkpoint(model,optimizer,iteration,out)
+
+    # raise NotImplementedError
 
 
 def run_load_checkpoint(
@@ -634,18 +638,20 @@ def run_load_checkpoint(
     optimizer: torch.optim.Optimizer,
 ) -> int:
     """
-    Given a serialized checkpoint (path or file-like object), restore the
-    serialized state to the given model and optimizer.
-    Return the number of iterations that we previously serialized in
-    the checkpoint.
+给定一个序列化的检查点（路径或类文件对象），将序列化的状态
+恢复到指定的模型和优化器中。
+返回我们之前在检查点中序列化的迭代次数。
 
-    Args:
-        src (str | os.PathLike | BinaryIO | IO[bytes]): Path or file-like object to serialized checkpoint.
-        model (torch.nn.Module): Restore the state of this model.
-        optimizer (torch.optim.Optimizer): Restore the state of this optimizer.
-    Returns:
-        int: the previously-serialized number of iterations.
-    """
+参数：
+    src (str | os.PathLike | BinaryIO | IO[bytes]): 序列化检查点的路径或类文件对象。
+    model (torch.nn.Module): 要恢复状态的模型。
+    optimizer (torch.optim.Optimizer): 要恢复状态的优化器。
+
+返回：
+    int: 之前序列化的迭代次数。
+"""
+    return load_checkpoint(src,model,optimizer)
+
     raise NotImplementedError
 
 
