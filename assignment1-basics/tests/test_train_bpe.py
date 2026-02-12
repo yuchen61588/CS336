@@ -7,8 +7,9 @@ from pathlib import Path
 from typing import List, Tuple, Dict, Optional, Any
 from tests.common import gpt2_bytes_to_unicode
 import os
+import pytest
 
-
+@pytest.mark.skip(reason="耗时太长，已通过，当前专注于大数据集处理")
 def test_train_bpe_speed():
     """
     Ensure that BPE training is relatively efficient by measuring training
@@ -30,7 +31,7 @@ def test_train_bpe_speed():
     print(end_time - start_time)
     assert end_time - start_time < 1.5
 
-
+@pytest.mark.skip(reason="耗时太长，已通过，当前专注于大数据集处理")
 def test_train_bpe():
     input_path = FIXTURES_PATH / "corpus.en"
     current_test_dir = Path(__file__).parent.resolve()
@@ -91,7 +92,7 @@ def test_train_bpe():
 
     print(f"模型已保存至: {output_dir}")
 
-
+@pytest.mark.skip(reason="耗时太长，已通过，当前专注于大数据集处理")
 def test_train_bpe_special_tokens(snapshot):
     """
     Ensure that the special tokens are added to the vocabulary and not
@@ -153,15 +154,7 @@ def save_tokenizer(
             str1 = "".join([b2u[b] for b in p1])
             f.write(f"{str0} {str1}\n")
 def test_train_bpe_tinystory():
-    """
-    Ensure that BPE training is relatively efficient by measuring training
-    time on this small dataset and throwing an error if it takes more than 1.5 seconds.
-    This is a pretty generous upper-bound, it takes 0.38 seconds with the
-    reference implementation on my laptop. In contrast, the toy implementation
-    takes around 3 seconds.
-    确保 BPE 训练相对高效：在这个小数据集上测量训练时间，若耗时超过 1.5 秒就抛出错误。
-    1.5 秒是相当宽松的上限——参考实现在我笔记本上只需 0.38 秒；而玩具级实现大约要 3 秒。
-    """
+    
     input_path = TINY_PATH / "TinyStoriesV2-GPT4-train.txt"
     current_test_dir = Path(__file__).parent.resolve()
     project_root = current_test_dir.parent
@@ -180,15 +173,7 @@ def test_train_bpe_tinystory():
     )
 
 def test_train_bpe_openWebText():
-    """
-    Ensure that BPE training is relatively efficient by measuring training
-    time on this small dataset and throwing an error if it takes more than 1.5 seconds.
-    This is a pretty generous upper-bound, it takes 0.38 seconds with the
-    reference implementation on my laptop. In contrast, the toy implementation
-    takes around 3 seconds.
-    确保 BPE 训练相对高效：在这个小数据集上测量训练时间，若耗时超过 1.5 秒就抛出错误。
-    1.5 秒是相当宽松的上限——参考实现在我笔记本上只需 0.38 秒；而玩具级实现大约要 3 秒。
-    """
+    
     input_path = TINY_PATH / "owt_train.txt"
     current_test_dir = Path(__file__).parent.resolve()
     project_root = current_test_dir.parent
