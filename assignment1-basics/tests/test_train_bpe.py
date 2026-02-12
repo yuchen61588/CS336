@@ -193,7 +193,7 @@ def test_train_bpe_tinystory():
 
 
     
-@pytest.mark.skip(reason="已数据集过大，使用服务器完成")
+
 def test_train_bpe_openWebText():
     
     input_path = TINY_PATH / "owt_train.txt"
@@ -202,7 +202,7 @@ def test_train_bpe_openWebText():
     output_dir = project_root / "merge_vocab"
     vocab, merges = run_train_bpe(
         input_path=input_path,
-        vocab_size=10000,
+        vocab_size=32000,
         special_tokens=["<|endoftext|>"],
     )
 
@@ -212,6 +212,7 @@ def test_train_bpe_openWebText():
         output_dir=output_dir,
         model_name="owt_train"
     )
+@pytest.mark.skip(reason="已数据集过大，使用服务器完成")
 def test_train_bpe_openWebText100MB():
     
     input_path = TINY_PATH / "owt_train.txt"
