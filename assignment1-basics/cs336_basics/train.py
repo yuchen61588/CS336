@@ -60,9 +60,9 @@ def train_single_model(exp_config: dict, common_config: dict, project_name: str)
     train_config = common_config['training']
     optimizer = AdamW(
         model.parameters(),
-        lr=train_config['learning_rate'],
-        betas=(train_config['beta1'], train_config['beta2']),
-        eps=train_config['eps'],
+        lr=float(train_config['learning_rate']),
+        betas=(float(train_config['beta1']), float(train_config['beta2'])), # 加上 float()
+        eps=float(train_config['eps']), # 加上 float()
         weight_decay=train_config.get('weight_decay', 0.0)
     )
 
@@ -70,12 +70,12 @@ def train_single_model(exp_config: dict, common_config: dict, project_name: str)
     os.makedirs(out_dir, exist_ok=True)
 
     model.train()
-    max_iters = train_config['max_iters']
-    warmup_iters = train_config['warmup_iters']
-    alpha_max = train_config['learning_rate']
-    alpha_min = train_config['min_lr']
-    grad_clip = train_config.get('grad_clip', 1.0)
-    save_interval = common_config['checkpoint']['save_interval']
+    max_iters = int(train_config['max_iters'])           # 强制转 int
+    warmup_iters = int(train_config['warmup_iters'])     # 强制转 int
+    alpha_max = float(train_config['learning_rate'])     # <--- 关键修改：转 float
+    alpha_min = float(train_config['min_lr'])            # <--- 关键修改：转 float
+    grad_clip = float(train_config.get('grad_clip', 1.0)) # 转 float
+    save_interval = int(common_config['checkpoint']['save_interval']) # 转 int
 
     pbar = tqdm(range(1, max_iters + 1), total=max_iters, desc=f"Training {run_name}")
 
@@ -146,6 +146,12 @@ def run_all_experiments(config_path: str):
 
 
 if __name__ == "__main__":
+
+    my_wandb_key = "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"
+    if my_wandb_key == "这里粘贴你的API_KEY":
+        print("警告: 你还没有设置 API Key。如果是第一次运行，请在代码最后一行填入 key，或者手动运行 wandb login。")
+    else:
+        wandb.login(key=my_wandb_key)
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, required=True, help='Path to yaml')
     args = parser.parse_args()

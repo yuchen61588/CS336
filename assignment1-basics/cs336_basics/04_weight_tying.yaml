@@ -3,8 +3,8 @@ project_name: "cs336-exp4-tying"
 
 common:
   data:
-    train_path: "data/TinyStories_train.npy"
-    val_path: "data/TinyStories_val.npy"
+    train_path: "output/TinyStories_train.npy"
+    val_path: "output/TinyStories_val.npy"
   training:
     device: "cuda"
     batch_size: 64

@@ -5,8 +5,8 @@ common: *common_config # (假设你合并文件，实际使用请复制上面的
 # 为了独立运行，这里再次写出 common
 common:
   data:
-    train_path: "data/TinyStories_train.npy"
-    val_path: "data/TinyStories_val.npy"
+    train_path: "output/TinyStories_train.npy"
+    val_path: "output/TinyStories_val.npy"
   training:
     device: "cuda"
     batch_size: 64

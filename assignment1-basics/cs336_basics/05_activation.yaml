@@ -1,10 +1,10 @@
-# 文件名: 02_norm_location.yaml
-project_name: "cs336-exp2-norm-location"
+# 文件名: 05_activation.yaml
+project_name: "cs336-exp5-activation"
 
-common: &common_config
+common:
   data:
-    train_path: "data/TinyStories_train.npy"
-    val_path: "data/TinyStories_val.npy"
+    train_path: "output/TinyStories_train.npy"
+    val_path: "output/TinyStories_val.npy"
   training:
     device: "cuda"
     batch_size: 64
@@ -18,53 +18,54 @@ common: &common_config
     eps: 1e-8
     grad_clip: 1.0
   checkpoint:
-    out_dir_base: "checkpoints/exp2"
+    out_dir_base: "checkpoints/exp5"
     save_interval: 2000
 
 experiments:
-  # 对照组：Post-Norm (Original)
-  - run_name: "Post-Norm"
+  # 1. 原始 ReLU
+  - run_name: "Act-ReLU"
     model:
       vocab_size: 10000
       context_length: 256
       d_model: 256
       num_layers: 4
       num_heads: 4
-      d_ff: 1024
-      pos_emb_type: "learned"
-      norm_location: "post"     # <--- 变量
-      norm_type: "layernorm"
-      ffn_type: "relu"
-      weight_tying: true
-      dropout: 0.1
-
-  # 实验组：Pre-Norm
-  - run_name: "Pre-Norm"
-    model:
-      vocab_size: 10000
-      context_length: 256
-      d_model: 256
-      num_layers: 4
-      num_heads: 4
-      d_ff: 1024
-      pos_emb_type: "learned"
-      norm_location: "pre"      # <--- 变量
-      norm_type: "layernorm"
-      ffn_type: "relu"
-      weight_tying: true
-      dropout: 0.1
-# 4. Modern SwiGLU
-  - run_name: "Act-SwiGLU"
-    model:
-      vocab_size: 10000
-      context_length: 256
-      d_model: 256
-      num_layers: 4
-      num_heads: 4
-      d_ff: 688            # 缩小宽度 (2/3 * 4 * d_model) 以对齐参数量
+      d_ff: 1024           # 标准宽度 (4 * d_model)
       pos_emb_type: "learned"
       norm_location: "post"
       norm_type: "layernorm"
-      ffn_type: "swiglu"   # <--- SwiGLU
+      ffn_type: "relu"     # <--- ReLU
+      weight_tying: true
+      dropout: 0.1
+
+  # 2. Modern SwiGLU
+  - run_name: "Act-SiLU"
+    model:
+      vocab_size: 10000
+      context_length: 256
+      d_model: 256
+      num_layers: 4
+      num_heads: 4
+      d_ff: 1024            # 缩小宽度 (2/3 * 4 * d_model) 以对齐参数量
+      pos_emb_type: "learned"
+      norm_location: "post"
+      norm_type: "layernorm"
+      ffn_type: "silu"   # <--- silu
+      weight_tying: true
+      dropout: 0.1
+
+  # 3. GPT-2 风格 GELU (修正点)
+  - run_name: "Act-GELU"
+    model:
+      vocab_size: 10000
+      context_length: 256
+      d_model: 256
+      num_layers: 4
+      num_heads: 4
+      d_ff: 1024           # 标准宽度 (4 * d_model)
+      pos_emb_type: "learned"
+      norm_location: "post"
+      norm_type: "layernorm"
+      ffn_type: "gelu"     # <--- GELU
       weight_tying: true
       dropout: 0.1
