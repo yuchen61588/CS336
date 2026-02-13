@@ -9,7 +9,7 @@ from tests.common import gpt2_bytes_to_unicode
 import os
 import pytest
 
-@pytest.mark.skip(reason="耗时太长，已通过，当前专注于大数据集处理")
+
 def test_train_bpe_speed():
     """
     Ensure that BPE training is relatively efficient by measuring training
@@ -31,7 +31,7 @@ def test_train_bpe_speed():
     print(end_time - start_time)
     assert end_time - start_time < 1.5
 
-@pytest.mark.skip(reason="耗时太长，已通过，当前专注于大数据集处理")
+
 def test_train_bpe():
     input_path = FIXTURES_PATH / "corpus.en"
     current_test_dir = Path(__file__).parent.resolve()
@@ -92,7 +92,7 @@ def test_train_bpe():
 
     print(f"模型已保存至: {output_dir}")
 
-@pytest.mark.skip(reason="耗时太长，已通过，当前专注于大数据集处理")
+
 def test_train_bpe_special_tokens(snapshot):
     """
     Ensure that the special tokens are added to the vocabulary and not
@@ -117,6 +117,7 @@ def test_train_bpe_special_tokens(snapshot):
             "merges": merges,
         },
     )
+
 def save_tokenizer(
     vocab: Dict[int, bytes],
     merges: List[Tuple[bytes, bytes]],
@@ -193,7 +194,7 @@ def test_train_bpe_tinystory():
 
 
     
-
+@pytest.mark.skip(reason="耗时太长，已通过，当前专注于大数据集处理")
 def test_train_bpe_openWebText():
     
     input_path = TINY_PATH / "owt_train.txt"

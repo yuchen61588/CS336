@@ -189,12 +189,18 @@ class SwiGLUFeedForward(nn.Module):
 
 # 标准化前馈网络，使用全连接层+relu +dropout+全连接层的配比方式
 class StandardFeedForward(nn.Module):
-    def __init__(self, d_model: int, d_ff: int, dropout: float = 0.0, device=None, dtype=None):
+    def __init__(self, d_model: int, d_ff: int, activation_type: str = 'relu', dropout: float = 0.0, device=None, dtype=None):
         super().__init__()
         # Original Transformer: d_ff = 4 * d_model [cite: 625]
         self.w1 = Linear(d_model, d_ff, device=device, dtype=dtype)
         self.w2 = Linear(d_ff, d_model, device=device, dtype=dtype)
-        self.relu = nn.ReLU()
+        if activation_type == 'relu':
+            self.act = nn.ReLU()
+        elif activation_type == 'silu':
+            self.act = nn.SiLU()
+        elif activation_type == 'gelu':
+            self.act = nn.GELU()
+
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -272,6 +278,33 @@ class ROPE(nn.Module):
         # - x(3D) * cos(3D): (B,S,D) * (B,S,D) -> OK
 
         return (x*cos)+(self._rotate_half(x)*sin)
+
+# 绝对位置编码
+class SinusoidalPositionalEmbedding(nn.Module):
+    def __init__(self, d_model: int, max_seq_len: int, device=None, dtype=None):
+        super().__init__()
+        # 创建一个足够长的 PE 矩阵
+        pe = torch.zeros(max_seq_len, d_model, device=device, dtype=dtype)
+        position = torch.arange(0, max_seq_len, dtype=torch.float, device=device).unsqueeze(1)
+        div_term = torch.exp(
+            torch.arange(0, d_model, 2, dtype=torch.float, device=device) * (-math.log(10000.0) / d_model))
+
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+
+        # 注册为 buffer：不是可训练参数，但随模型 state_dict 保存
+        self.register_buffer('pe', pe)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x: Embedding 后的输入，形状 (batch, seq_len, d_model)
+        Returns:
+            对应的位置编码，形状 (1, seq_len, d_model)
+        """
+        seq_len = x.size(1)
+        # 截取当前序列长度对应的编码，并增加 batch 维度以便广播
+        return self.pe[:seq_len, :].unsqueeze(0)
 
 class CausalMultiHeadSelfAttention(nn.Module):
     def __init__(self,d_model:int,num_heads:int,device: torch.device | None = None,
@@ -364,26 +397,34 @@ class Transformer_block(nn.Module):
 
         NormClass = RMSNorm if norm_type == 'rmsnorm' else nn.LayerNorm
 
-        # 对于 nn.LayerNorm，PyTorch 原生实现需要 eps 参数
-        if norm_type == 'layernorm':
-            # 1. 第一个子层: MHA
-            # 顺序: RMSNorm -> MHA -> Residual Add
-            self.norm1 = NormClass(d_model, eps=1e-5, device=device, dtype=dtype)
-            # 2. 第二个子层: FFN
-            # 顺序: RMSNorm -> FFN -> Residual Add
-            self.norm2 = NormClass(d_model, eps=1e-5, device=device, dtype=dtype)
-        else:
-            self.norm1 = NormClass(d_model, device=device, dtype=dtype)
-            self.norm2 = NormClass(d_model, device=device, dtype=dtype)
+        # 修改：增加 'none' 支持，返回 Identity
+        if norm_type == 'rmsnorm':
+            NormClass = lambda d: RMSNorm(d, eps=1e-5, device=device, dtype=dtype)
+        elif norm_type == 'layernorm':
+            NormClass = lambda d: nn.LayerNorm(d, eps=1e-5, device=device, dtype=dtype)
+        elif norm_type == 'none':
+            NormClass = lambda d: nn.Identity()  # 不做任何操作
+
+        self.norm1 = NormClass(d_model)
+        self.norm2 = NormClass(d_model)
 
         self.mha = CausalMultiHeadSelfAttention(d_model,num_heads,device=device,dtype=dtype)
 
         # 工厂模式：选择 FFN
+        # 修改：FFN 分发逻辑，支持 swiglu, relu, silu gelu
         if ffn_type == 'swiglu':
             self.ffn = SwiGLUFeedForward(d_model, d_ff, device=device, dtype=dtype)
+        elif ffn_type == 'relu':
+            # 原始架构
+            self.ffn = StandardFeedForward(d_model, d_ff, activation_type='relu', dropout=dropout, device=device,
+                                           dtype=dtype)
+        elif ffn_type == 'silu':
+            # 用于对比 SwiGLU 的非门控版本
+            self.ffn = StandardFeedForward(d_model, d_ff, activation_type='silu', dropout=dropout, device=device,
+                                           dtype=dtype)
         else:
-            # 如果是 Standard/Original，d_ff 通常是 4倍
-            self.ffn = StandardFeedForward(d_model, d_ff, dropout, device=device, dtype=dtype)
+            self.ffn = StandardFeedForward(d_model, d_ff, activation_type='gelu', dropout=dropout, device=device,
+                                           dtype=dtype)
     def forward(self,x:torch.Tensor,rope_embed:nn.Module)->torch.Tensor:
         """
             Args:
@@ -447,17 +488,14 @@ class TransformerLM(nn.Module):
             dtype=dtype
         )
         # 位置编码选择
-        self.use_rope = config.get('use_rope', True)
-        self.learned_pos_embed = None
+        self.pos_emb_type = config.get('pos_emb_type', 'rope')
 
-        if not self.use_rope:
-            # Original Transformer 使用绝对位置编码 (Learned Absolute PE)
-            self.learned_pos_embed = nn.Parameter(torch.zeros(1, context_length, d_model, device=device, dtype=dtype))
-            nn.init.trunc_normal_(self.learned_pos_embed, std=0.02)
-        else:
-            # 2. 初始化 RoPE
+        # 初始化占位符
+        self.rope = None #这个是用来在Attention判断是否需要旋转编码的，不然会出问题
+        self.abs_pos_embed = None
+
+        if self.pos_emb_type == 'rope':
             # RoPE 只需要初始化一次，然后在所有层之间共享
-            # d_k = d_model / num_heads
             d_k = d_model // num_heads
             self.rope = ROPE(
                 theta=rope_theta,
@@ -465,6 +503,27 @@ class TransformerLM(nn.Module):
                 max_seq_len=context_length,
                 device=device
             )
+
+        elif self.pos_emb_type == 'learned':
+            # Learned Absolute Positional Embedding (原始 GPT-2/3 风格)
+            # 可学习参数，直接加在 input embedding 上
+            self.abs_pos_embed = nn.Parameter(torch.zeros(1, context_length, d_model, device=device, dtype=dtype))
+            nn.init.trunc_normal_(self.abs_pos_embed, std=0.02)
+
+        elif self.pos_emb_type == 'sinusoidal':
+            # Fixed Sinusoidal Positional Embedding (原始 Transformer 论文风格)
+            self.abs_pos_embed = SinusoidalPositionalEmbedding(
+                d_model=d_model,
+                max_seq_len=context_length,
+                device=device,
+                dtype=dtype
+            )
+
+        elif self.pos_emb_type == 'none':
+            # NoPE (No Positional Embedding)
+            pass
+        else:
+            raise ValueError(f"Unknown pos_emb_type: {self.pos_emb_type}")
 
         # 堆叠Transformer Blocks
         self.layers = nn.ModuleList([
@@ -479,11 +538,14 @@ class TransformerLM(nn.Module):
         ])
         # Final Norm
         norm_type = config.get('norm_type', 'rmsnorm')
-        NormClass = RMSNorm if norm_type == 'rmsnorm' else nn.LayerNorm
-        if norm_type == 'layernorm':
-            self.final_norm = NormClass(d_model, eps=1e-5, device=device, dtype=dtype)
+        if norm_type == 'rmsnorm':
+            self.final_norm = RMSNorm(d_model, eps=1e-5, device=device, dtype=dtype)
+        elif norm_type == 'layernorm':
+            self.final_norm = nn.LayerNorm(d_model, eps=1e-5, device=device, dtype=dtype)
+        elif norm_type == 'none':
+            self.final_norm = nn.Identity()  # 不做归一化
         else:
-            self.final_norm = NormClass(d_model, device=device, dtype=dtype)
+            raise ValueError(f"Unknown norm_type: {norm_type}")
 
         self.output_head = Linear(
             in_features=d_model,
@@ -509,6 +571,16 @@ class TransformerLM(nn.Module):
             """
         x = self.embedding(token_ids)
         # 2. 穿过所有 Transformer 层
+        # 2. 应用绝对位置编码 (如果是 Learned 或 Sinusoidal)
+        # RoPE 是在 Attention 层内部作用的，所以这里不处理
+        if self.pos_emb_type in ['learned', 'sinusoidal']:
+            if self.pos_emb_type == 'learned':
+                # 截取当前长度并相加
+                seq_len = token_ids.size(1)
+                x = x + self.abs_pos_embed[:, :seq_len, :]
+            else:
+                # Sinusoidal 模块内部处理了截取逻辑
+                x = x + self.abs_pos_embed(x)
         for layer in self.layers:
             # 将 rope 实例传给每个 block
             x = layer(x, rope_embed=self.rope)

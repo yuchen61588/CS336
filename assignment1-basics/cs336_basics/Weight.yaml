@@ -1,5 +1,5 @@
-# 文件名: 01_llama_vs_vanilla.yaml
-project_name: "cs336-exp1-arch-compare"
+# 文件名: 04_weight_tying.yaml
+project_name: "cs336-exp4-tying"
 
 common:
   data:
@@ -8,7 +8,7 @@ common:
   training:
     device: "cuda"
     batch_size: 64
-    max_iters: 40000  # 适当调整步数
+    max_iters: 20000
     learning_rate: 3e-4
     min_lr: 3e-5
     warmup_iters: 1000
@@ -18,40 +18,36 @@ common:
     eps: 1e-8
     grad_clip: 1.0
   checkpoint:
-    out_dir_base: "checkpoints/exp1"
+    out_dir_base: "checkpoints/exp4"
     save_interval: 2000
 
 experiments:
-  # Llama 架构
-  - run_name: "Llama-Architecture"
+  - run_name: "Weight-Tied"
     model:
       vocab_size: 10000
       context_length: 256
       d_model: 256
       num_layers: 4
       num_heads: 4
-      d_ff: 688            # SwiGLU 维度 (256 * 8/3 ≈ 682 -> 688)
-      rope_theta: 10000.0
-      pos_emb_type: "rope"
-      norm_location: "pre"
-      norm_type: "rmsnorm"
-      ffn_type: "swiglu"
-      weight_tying: true
-      dropout: 0.1
-
-  # Vanilla (Original) 架构
-  - run_name: "Vanilla-Architecture"
-    model:
-      vocab_size: 10000
-      context_length: 256
-      d_model: 256
-      num_layers: 4
-      num_heads: 4
-      d_ff: 1024           # ReLU 维度 (256 * 4 = 1024)
-      rope_theta: 10000.0
+      d_ff: 1024
       pos_emb_type: "learned"
       norm_location: "post"
       norm_type: "layernorm"
       ffn_type: "relu"
-      weight_tying: true
+      weight_tying: true     # <--- 变量
+      dropout: 0.1
+
+  - run_name: "Weight-Untied"
+    model:
+      vocab_size: 10000
+      context_length: 256
+      d_model: 256
+      num_layers: 4
+      num_heads: 4
+      d_ff: 1024
+      pos_emb_type: "learned"
+      norm_location: "post"
+      norm_type: "layernorm"
+      ffn_type: "relu"
+      weight_tying: false    # <--- 变量
       dropout: 0.1

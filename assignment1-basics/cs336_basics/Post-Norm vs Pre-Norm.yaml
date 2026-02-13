@@ -1,0 +1,70 @@
+# 文件名: 02_norm_location.yaml
+project_name: "cs336-exp2-norm-location"
+
+common: &common_config
+  data:
+    train_path: "data/TinyStories_train.npy"
+    val_path: "data/TinyStories_val.npy"
+  training:
+    device: "cuda"
+    batch_size: 64
+    max_iters: 40000
+    learning_rate: 3e-4
+    min_lr: 3e-5
+    warmup_iters: 1000
+    weight_decay: 0.1
+    beta1: 0.9
+    beta2: 0.95
+    eps: 1e-8
+    grad_clip: 1.0
+  checkpoint:
+    out_dir_base: "checkpoints/exp2"
+    save_interval: 2000
+
+experiments:
+  # 对照组：Post-Norm (Original)
+  - run_name: "Post-Norm"
+    model:
+      vocab_size: 10000
+      context_length: 256
+      d_model: 256
+      num_layers: 4
+      num_heads: 4
+      d_ff: 1024
+      pos_emb_type: "learned"
+      norm_location: "post"     # <--- 变量
+      norm_type: "layernorm"
+      ffn_type: "relu"
+      weight_tying: true
+      dropout: 0.1
+
+  # 实验组：Pre-Norm
+  - run_name: "Pre-Norm"
+    model:
+      vocab_size: 10000
+      context_length: 256
+      d_model: 256
+      num_layers: 4
+      num_heads: 4
+      d_ff: 1024
+      pos_emb_type: "learned"
+      norm_location: "pre"      # <--- 变量
+      norm_type: "layernorm"
+      ffn_type: "relu"
+      weight_tying: true
+      dropout: 0.1
+# 4. Modern SwiGLU
+  - run_name: "Act-SwiGLU"
+    model:
+      vocab_size: 10000
+      context_length: 256
+      d_model: 256
+      num_layers: 4
+      num_heads: 4
+      d_ff: 688            # 缩小宽度 (2/3 * 4 * d_model) 以对齐参数量
+      pos_emb_type: "learned"
+      norm_location: "post"
+      norm_type: "layernorm"
+      ffn_type: "swiglu"   # <--- SwiGLU
+      weight_tying: true
+      dropout: 0.1

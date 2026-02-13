@@ -165,6 +165,7 @@ def test_transformer_block(numpy_snapshot, ts_state_dict, in_embeddings, d_model
         max_seq_len=n_keys,
         theta=theta,
         weights=block_weights,
+
         in_features=in_embeddings,
     )
     numpy_snapshot.assert_match(

@@ -322,7 +322,27 @@ def run_transformer_block(
         返回:
             Float[Tensor, "batch sequence_length d_model"]: 使用 RoPE 在输入特征上运行 Transformer 块的输出张量。
         """
-    block = Transformer_block(d_model, num_heads, d_ff)
+    llama_config = {
+        # === 模型维度参数 (根据测试需求调整大小) ===
+        "vocab_size": 10000,  # 词表大小
+        "context_length": 256,  # 上下文窗口长度
+        "d_model": 256,  # 嵌入维度
+        "num_layers": 4,  # Transformer 层数
+        "num_heads": 4,  # 注意力头数
+        "d_ff": 688,  # FFN 维度 (SwiGLU 建议值: ~2/3 * 4d, 或 8/3 d_model)
+        "rope_theta": 10000.0,  # RoPE 频率基数
+
+        # === 核心架构开关 (Llama 特征) ===
+        "pos_emb_type": "rope",  # [核心] 使用 RoPE，替代了旧的 use_rope
+        "norm_location": "pre",  # Pre-Norm: x = x + Layer(Norm(x))
+        "norm_type": "rmsnorm",  # 使用 RMSNorm 而非 LayerNorm
+        "ffn_type": "swiglu",  # 使用 SwiGLU 门控前馈网络
+
+        # === 其他配置 ===
+        "weight_tying": False,  # 权重绑定 (输出层共享 Embedding 权重)
+        "dropout": 0.1  # 防止过拟合
+    }
+    block = Transformer_block(d_model, num_heads, d_ff,llama_config)
 
     # 构造 RoPE
     d_k = d_model // num_heads
@@ -335,8 +355,8 @@ def run_transformer_block(
     block.mha.qkv_proj.weight.data = torch.cat([q, k, v], dim=0)
 
     block.mha.o_proj.weight.data = weights['attn.output_proj.weight']
-    block.rms_norm1.weight.data = weights['ln1.weight']
-    block.rms_norm2.weight.data = weights['ln2.weight']
+    block.norm1.weight.data = weights['ln1.weight']
+    block.norm2.weight.data = weights['ln2.weight']
     block.ffn.w1.weight.data = weights['ffn.w1.weight']
     block.ffn.w2.weight.data = weights['ffn.w2.weight']
     block.ffn.w3.weight.data = weights['ffn.w3.weight']
@@ -421,7 +441,27 @@ def run_transformer_lm(
             Float[Tensor, "batch_size sequence_length vocab_size"]:
                 每个 token 预测的未归一化下一个词分布张量（logits）。
         """
-    lm = TransformerLM(vocab_size, context_length, d_model, num_layers, num_heads, d_ff, rope_theta)
+    llama_config = {
+        # === 模型维度参数 (根据测试需求调整大小) ===
+        "vocab_size": 10000,  # 词表大小
+        "context_length": 256,  # 上下文窗口长度
+        "d_model": 256,  # 嵌入维度
+        "num_layers": 4,  # Transformer 层数
+        "num_heads": 4,  # 注意力头数
+        "d_ff": 688,  # FFN 维度 (SwiGLU 建议值: ~2/3 * 4d, 或 8/3 d_model)
+        "rope_theta": 10000.0,  # RoPE 频率基数
+
+        # === 核心架构开关 (Llama 特征) ===
+        "pos_emb_type": "rope",  # [核心] 使用 RoPE，替代了旧的 use_rope
+        "norm_location": "pre",  # Pre-Norm: x = x + Layer(Norm(x))
+        "norm_type": "rmsnorm",  # 使用 RMSNorm 而非 LayerNorm
+        "ffn_type": "swiglu",  # 使用 SwiGLU 门控前馈网络
+
+        # === 其他配置 ===
+        "weight_tying": False,  # 权重绑定 (输出层共享 Embedding 权重)
+        "dropout": 0.1  # 防止过拟合
+    }
+    lm = TransformerLM(vocab_size, context_length, d_model, num_layers, num_heads, d_ff, rope_theta,llama_config)
 
     # 你的 TransformerLM __init__ 中硬编码了 theta=10000.0
     # 为了通过可能使用不同 theta 的测试，我们需要在这里覆盖它
@@ -451,8 +491,8 @@ def run_transformer_lm(
         # 2. 其他权重直接映射
         # 注意：你的模型中属性名是 mha, rms_norm1, ffn, rms_norm2
         new_state_dict[f'{tgt_prefix}mha.o_proj.weight'] = weights[f'{src_prefix}attn.output_proj.weight']
-        new_state_dict[f'{tgt_prefix}rms_norm1.weight'] = weights[f'{src_prefix}ln1.weight']
-        new_state_dict[f'{tgt_prefix}rms_norm2.weight'] = weights[f'{src_prefix}ln2.weight']
+        new_state_dict[f'{tgt_prefix}norm1.weight'] = weights[f'{src_prefix}ln1.weight']
+        new_state_dict[f'{tgt_prefix}norm2.weight'] = weights[f'{src_prefix}ln2.weight']
 
         new_state_dict[f'{tgt_prefix}ffn.w1.weight'] = weights[f'{src_prefix}ffn.w1.weight']
         new_state_dict[f'{tgt_prefix}ffn.w2.weight'] = weights[f'{src_prefix}ffn.w2.weight']
