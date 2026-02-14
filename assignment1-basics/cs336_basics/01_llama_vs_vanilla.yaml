@@ -3,12 +3,12 @@ project_name: "cs336-exp1-arch-compare"
 
 common:
   data:
-    train_path: "output/TinyStories_train.npy"
-    val_path: "output/TinyStories_val.npy"
+    train_path: "output/owt_train.npy"
+    val_path: "output/owt_valid.npy"
   training:
     device: "cuda"
     batch_size: 64
-    max_iters: 40000  # 适当调整步数
+    max_iters: 25000  # 适当调整步数
     learning_rate: 3e-4
     min_lr: 3e-5
     warmup_iters: 10000

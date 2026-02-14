@@ -110,15 +110,16 @@ python tests/text_tokenizer_mul.py -v
 # 消融实验
 # 1. 实验一：架构对比 (Llama vs Vanilla)
 python cs336_basics/train.py --config cs336_basics/01_llama_vs_vanilla.yaml
-
+python cs336_basics/valloss.py --config cs336_basics/01_llama_vs_vanilla.yaml
 # 2. 实验二：Norm 位置对比 (Pre-Norm vs Post-Norm)
 python cs336_basics/train.py --config cs336_basics/02_norm_location.yaml
-
+python cs336_basics/valloss.py  --config cs336_basics/02_norm_location.yaml
 # 3. 实验三：位置编码对比 (RoPE, NoPE, Sinusoidal, Learned)
 python cs336_basics/train.py --config cs336_basics/03_positional_encoding.yaml
-
+python cs336_basics/valloss.py  --config cs336_basics/03_positional_encoding.yaml
 # 4. 实验四：权重绑定对比 (Tied vs Untied)
 python cs336_basics/train.py --config cs336_basics/04_weight_tying.yaml
-
+python cs336_basics/valloss.py --config cs336_basics/04_weight_tying.yaml
 # 5. 实验五：激活函数对比 (ReLU vs SwiGLU vs GELU)
 python cs336_basics/train.py --config cs336_basics/05_activation.yaml
+python cs336_basics/valloss.py --config cs336_basics/04_weight_tying.yaml

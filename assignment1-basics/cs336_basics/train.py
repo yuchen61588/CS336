@@ -82,6 +82,7 @@ def train_single_model(exp_config: dict, common_config: dict, project_name: str)
     for step in pbar:
         x, y = train_loader.get_batch()
 
+        # 计算并更新学习率
         lr = get_lr_cosine_schedule(step, alpha_max, alpha_min, warmup_iters, max_iters)
         for param_group in optimizer.param_groups:
             param_group['lr'] = lr
@@ -104,16 +105,22 @@ def train_single_model(exp_config: dict, common_config: dict, project_name: str)
 
         optimizer.step()
 
-        # === 关键点 2：记录名字必须完全一样 ===
-        # 因为所有模型都向 "train/loss" 和 "train/grad_norm" 写入数据
-        # WandB 就会把它们叠加在一起，用不同颜色区分
+        # === 修改点：灵活控制记录策略 ===
+        # 1. 基础指标：每一步都记录
         metrics = {
-            "train/loss": loss.item(),
             "train/grad_norm": grad_norm,
             "train/lr": lr,
         }
+
+        # 2. Loss 指标：只有 300 步以后才加入字典
+        # 这样 WandB 上 Loss 曲线会从第 301 步开始画，自动适配坐标轴
+        if step > 300:
+            metrics["train/loss"] = loss.item()
+
+        # 提交日志
         wandb.log(metrics, step=step)
 
+        # 进度条 (pbar) 依然显示实时 Loss，方便你肉眼监控
         pbar.set_postfix({'loss': f"{loss.item():.4f}", 'grad_norm': f"{grad_norm:.2f}"})
 
         if step % save_interval == 0 or step == max_iters:

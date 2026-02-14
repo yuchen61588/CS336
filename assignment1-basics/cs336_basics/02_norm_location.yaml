@@ -3,15 +3,15 @@ project_name: "cs336-exp2-norm-location"
 
 common: &common_config
   data:
-    train_path: "output/TinyStories_train.npy"
-    val_path: "output/TinyStories_val.npy"
+    train_path: "output/owt_train.npy"
+    val_path: "output/owt_valid.npy"
   training:
     device: "cuda"
     batch_size: 64
-    max_iters: 40000
+    max_iters: 25000
     learning_rate: 3e-4
     min_lr: 3e-5
-    warmup_iters: 1000
+    warmup_iters: 10000
     weight_decay: 0.1
     beta1: 0.9
     beta2: 0.95
@@ -51,20 +51,5 @@ experiments:
       norm_location: "pre"      # <--- 变量
       norm_type: "layernorm"
       ffn_type: "relu"
-      weight_tying: true
-      dropout: 0.1
-# 4. Modern SwiGLU
-  - run_name: "Act-SwiGLU"
-    model:
-      vocab_size: 10000
-      context_length: 256
-      d_model: 256
-      num_layers: 4
-      num_heads: 4
-      d_ff: 688            # 缩小宽度 (2/3 * 4 * d_model) 以对齐参数量
-      pos_emb_type: "learned"
-      norm_location: "post"
-      norm_type: "layernorm"
-      ffn_type: "swiglu"   # <--- SwiGLU
       weight_tying: true
       dropout: 0.1

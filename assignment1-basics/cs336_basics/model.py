@@ -205,7 +205,7 @@ class StandardFeedForward(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # FFN(x) = ReLU(xW1)W2
-        return self.w2(self.dropout(self.relu(self.w1(x))))
+        return self.w2(self.dropout(self.act(self.w1(x))))
 
 
 class ROPE(nn.Module):

@@ -81,10 +81,10 @@ def encode_and_save(tokenizer, input_path, output_path, batch_size=10000):
 
 def main():
     # === 配置路径 ===
-    raw_train_path = "data/TinyStoriesV2-GPT4-train.txt"
-    raw_val_path = "data/TinyStoriesV2-GPT4-valid.txt"
-    npy_train_out = "output/TinyStories_train.npy"
-    npy_val_out = "output/TinyStories_val.npy"
+    raw_train_path = "data/owt_train.txt"
+    raw_val_path = "data/owt_valid.txt"
+    npy_train_out = "output/owt_train.npy"
+    npy_val_out = "output/owt_valid.npy"
     tokenizer_save_path = "merge_vocab/tokenizer.json"
 
     os.makedirs("output", exist_ok=True)

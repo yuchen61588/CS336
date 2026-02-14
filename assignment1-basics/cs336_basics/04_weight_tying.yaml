@@ -3,15 +3,15 @@ project_name: "cs336-exp4-tying"
 
 common:
   data:
-    train_path: "output/TinyStories_train.npy"
-    val_path: "output/TinyStories_val.npy"
+    train_path: "output/owt_train.npy"
+    val_path: "output/owt_valid.npy"
   training:
     device: "cuda"
     batch_size: 64
-    max_iters: 20000
+    max_iters: 25000
     learning_rate: 3e-4
     min_lr: 3e-5
-    warmup_iters: 1000
+    warmup_iters: 10000
     weight_decay: 0.1
     beta1: 0.9
     beta2: 0.95
@@ -29,7 +29,7 @@ experiments:
       d_model: 256
       num_layers: 4
       num_heads: 4
-      d_ff: 1024
+      d_ff: 2304
       pos_emb_type: "learned"
       norm_location: "post"
       norm_type: "layernorm"
