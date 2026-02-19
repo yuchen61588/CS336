@@ -13,6 +13,7 @@ raise a GitHub issue or open a pull request with a fix.
 As in previous assignments, we use `uv` to manage dependencies.
 
 1. Install all packages except `flash-attn`, then all packages (`flash-attn` is weird)
+安装软件包：先安装除 flash-attn 以外的所有包，然后再安装全部（因为 flash-attn 的安装机制比较特殊/古怪）：
 ```
 uv sync --no-install-package flash-attn
 uv sync
@@ -27,4 +28,6 @@ uv run pytest
 Initially, all tests should fail with `NotImplementedError`s.
 To connect your implementation to the tests, complete the
 functions in [./tests/adapters.py](./tests/adapters.py).
+初始状态下，所有测试都会因为 NotImplementedError（未实现错误）而失败。
+为了将你的代码实现与测试框架连接起来，请完成 ./tests/adapters.py 中的函数编写。
 
