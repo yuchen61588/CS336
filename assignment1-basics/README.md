@@ -109,7 +109,7 @@ python tests/text_tokenizer_mul.py -v
  python cs336_basics/train_bpe2.py -v
 # 消融实验
 # 1. 实验一：架构对比 (Llama vs Vanilla)
-python cs336_basics/train.py --config cs336_basics/01_llama_vs_vanilla.yaml
+python cs336_basics/train.py --config config/01_llama_vs_vanilla.yaml
 python cs336_basics/valloss.py --config cs336_basics/01_llama_vs_vanilla.yaml
 # 2. 实验二：Norm 位置对比 (Pre-Norm vs Post-Norm)
 python cs336_basics/train.py --config cs336_basics/02_norm_location.yaml
