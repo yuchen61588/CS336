@@ -31,3 +31,7 @@ functions in [./tests/adapters.py](./tests/adapters.py).
 初始状态下，所有测试都会因为 NotImplementedError（未实现错误）而失败。
 为了将你的代码实现与测试框架连接起来，请完成 ./tests/adapters.py 中的函数编写。
 
+source .venv/bin/activate
+/bin/vim ~/.bashrc
+vim ~/.bashrc
+
