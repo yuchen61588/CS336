@@ -17,6 +17,7 @@ As in previous assignments, we use `uv` to manage dependencies.
 ```
 uv sync --no-install-package flash-attn
 uv sync
+pip install --upgrade datasets fsspec huggingface_hub
 ```
 
 2. Run unit tests:
@@ -34,4 +35,9 @@ functions in [./tests/adapters.py](./tests/adapters.py).
 source .venv/bin/activate
 /bin/vim ~/.bashrc
 vim ~/.bashrc
+
+# baseline命令
+python cs336_alignment/math_baseline.py --model_name qwen_1.5b
+
+
 

@@ -1,7 +1,10 @@
-# generate_test_data.py
 import os
 import json
 from datasets import load_dataset
+
+# 强制使用国内镜像并禁用可能报错的 XetHub
+os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+os.environ["HF_HUB_DISABLE_XET"] = "1"
 
 def main():
     # 设定输出目录
@@ -9,9 +12,12 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
     val_output_path = os.path.join(output_dir, "validation.jsonl")
 
-    print("正在加载 GSM8K 测试集数据...")
-    # 加载数据集
-    dataset = load_dataset("openai/gsm8k", "main")
+    print("正在通过 HF-Mirror 镜像站直接加载 GSM8K 测试集...")
+    # 绕过 builder，直接拉取 parquet 文件
+    dataset = load_dataset(
+        "parquet", 
+        data_files={"test": "https://hf-mirror.com/datasets/openai/gsm8k/resolve/main/main/test-00000-of-00001.parquet"}
+    )
     test_data = dataset["test"]
 
     print(f"正在生成验证集，保存至 {val_output_path} ...")

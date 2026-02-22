@@ -1,9 +1,12 @@
-# generate_train_data.py
 import os
 import json
 from datasets import load_dataset
 
-# r1_zero 提示词模板 [cite: 78, 79, 80, 81, 82]
+# 强制使用国内镜像并禁用可能报错的 XetHub
+os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+os.environ["HF_HUB_DISABLE_XET"] = "1"
+
+# r1_zero 提示词模板
 R1_ZERO_PROMPT = """A conversation between User and Assistant. The User asks a question, and the Assistant solves it. The Assistant first thinks about the reasoning process in the mind and then provides the User with the answer. The reasoning process is enclosed within <think> </think> and answer is enclosed within <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>.
 User: {question}
 Assistant: <think>
@@ -11,7 +14,7 @@ Assistant: <think>
 
 def format_for_sft(question: str, original_answer: str) -> dict:
     """
-    将数据格式化为 SFT 需要的 {"prompt": str, "response": str} 格式 [cite: 362]
+    将数据格式化为 SFT 需要的 {"prompt": str, "response": str} 格式
     """
     if "####" in original_answer:
         parts = original_answer.split("####")
@@ -37,8 +40,12 @@ def main():
     train_output_path = os.path.join(output_dir, "train.jsonl")
     sft_output_path = os.path.join(output_dir, "sft.jsonl")
 
-    print("正在加载 GSM8K 训练集数据...")
-    dataset = load_dataset("openai/gsm8k", "main")
+    print("正在通过 HF-Mirror 镜像站直接加载 GSM8K 训练集...")
+    # 绕过 builder，直接拉取 parquet 文件
+    dataset = load_dataset(
+        "parquet", 
+        data_files={"train": "https://hf-mirror.com/datasets/openai/gsm8k/resolve/main/main/train-00000-of-00001.parquet"}
+    )
     train_data = dataset["train"]
 
     print(f"正在生成 RL 训练集 (用于 Expert Iteration 和 GRPO)，保存至 {train_output_path} ...")
