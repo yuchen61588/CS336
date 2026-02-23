@@ -1,7 +1,7 @@
 import os
 from huggingface_hub import snapshot_download
 
-local_model_dir = "data/models/Qwen2.5-Math-1.5B"
+local_model_dir = "train_data/models/Qwen2.5-Math-1.5B"
 os.makedirs(local_model_dir, exist_ok=True)
 
 print(f"正在下载 Qwen/Qwen2.5-Math-1.5B 到 {local_model_dir} ...")

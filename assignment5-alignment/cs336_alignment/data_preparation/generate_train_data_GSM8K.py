@@ -34,7 +34,7 @@ def format_for_sft(question: str, original_answer: str) -> dict:
     }
 
 def main():
-    output_dir = "data/datasets/MATH"
+    output_dir = "train_data/datasets/MATH"
     os.makedirs(output_dir, exist_ok=True)
     
     train_output_path = os.path.join(output_dir, "train.jsonl")

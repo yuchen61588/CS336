@@ -1,0 +1,15 @@
+# base.yaml (纯粹的训练引擎与硬件基座)
+
+training:
+  device: "cuda:0"                 # 单卡 4090 直接使用 cuda:0
+  batch_size: 8                    # 训练时的 micro-batch size
+  gradient_accumulation_steps: 4   # 梯度累积，等效 Global Batch Size = 32
+  learning_rate: 2.0e-5
+  epochs: 3
+  max_grad_norm: 1.0
+  eval_every_n_steps: 50           # 每 50 步评估一次
+  eval_batch_size: 4               # [重要] 4090 防 OOM 专用：评估生成时的并发量
+  save_every_n_steps: 100
+
+wandb:
+  project_name: "cs336-alignment-sft"

@@ -38,6 +38,9 @@ vim ~/.bashrc
 
 # baseline命令
 python cs336_alignment/math_baseline.py --model_name qwen_1.5b
+# sft 数据集训练
+python cs336_alignment/data_preparation/generation_data_Bespoke-Stratos-17k_RL_SFT.py
+python cs336_alignment/sft_run.py --base_config config/sft/sft_base.yaml --exp_config config/sft/qwen_2.5B_bespoke_128_false.yaml
 
 
 

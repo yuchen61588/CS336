@@ -7,6 +7,7 @@ import torch
 from torch import Tensor
 from torch.utils.data import Dataset
 from transformers import PreTrainedTokenizerBase
+from cs336_alignment.sft import tokenize_prompt_and_output,masked_normalize,compute_entropy,get_response_log_probs,sft_microbatch_train_step
 
 
 def run_tokenize_prompt_and_output(
@@ -14,23 +15,25 @@ def run_tokenize_prompt_and_output(
     output_strs: list[str],
     tokenizer: PreTrainedTokenizerBase,
 ) -> dict[str, Tensor]:
-    """Tokenize the prompt and output strings, and construct a mask that is 1
-    for the response tokens and 0 for other tokens (prompt or padding).
+    """对提示词（prompt）和输出（output）字符串进行分词，并构建一个掩码（mask）。
+该掩码在回答（response）令牌处为 1，在其他令牌（提示词或填充位/padding）处为 0。
 
-    Args:
-        prompt_strs: list[str], the prompt strings.
-        output_strs: list[str], the output strings.
-        tokenizer: PreTrainedTokenizer, the tokenizer to use.
+参数:
+    prompt_strs: list[str]，提示词字符串列表。
+    output_strs: list[str]，输出字符串列表。
+    tokenizer: PreTrainedTokenizer，所使用的分词器。
 
-    Returns:
-        dict[str, torch.Tensor]:
-            "input_ids": torch.Tensor of shape (batch_size, max(prompt_and_output_lens) - 1):
-                the tokenized prompt and output strings, with the final token sliced off.
-            "labels": torch.Tensor of shape (batch_size, max(prompt_and_output_lens) - 1):
-                shifted input_ids (i.e., the input_ids without the first token).
-            "response_mask": torch.Tensor of shape (batch_size, max(prompt_and_output_lens) - 1):
-                a mask on the response tokens in `labels`.
-    """
+返回:
+    dict[str, torch.Tensor]:
+        "input_ids": 形状为 (batch_size, max(prompt_and_output_lens) - 1) 的张量：
+            分词后的提示词与输出字符串，且切掉了最后一个令牌。
+        "labels": 形状为 (batch_size, max(prompt_and_output_lens) - 1) 的张量：
+            偏移后的 input_ids（即去掉了第一个令牌的 input_ids）。
+        "response_mask": 形状为 (batch_size, max(prompt_and_output_lens) - 1) 的张量：
+            对应 `labels` 中回答（response）部分的令牌掩码。
+"""
+
+    return tokenize_prompt_and_output(prompt_strs,output_strs,tokenizer)
     raise NotImplementedError
 
 
@@ -43,45 +46,41 @@ def run_compute_group_normalized_rewards(
     normalize_by_std: bool,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     """
-    Compute rewards for each group of rollout responses, 
-    normalized by the group size.
+计算每一组采样回答（rollout responses）的奖励值，
+并按组大小（group size）进行归一化处理。
 
-    For more on GRPO, see:
-        DeepSeekMath: https://arxiv.org/abs/2402.03300
-        DeepSeek-R1: https://arxiv.org/abs/2501.12948
+关于 GRPO 的更多信息，请参阅：
+    DeepSeekMath: https://arxiv.org/abs/2402.03300
+    DeepSeek-R1: https://arxiv.org/abs/2501.12948
 
-    Args:
-        reward_fn: Callable[[str, str], dict[str, float]], 
-            scores the rollout responses against the ground truths, 
-            producing a dict with keys 
-            "reward", "format_reward", and "answer_reward".
-        rollout_responses: list[str], rollouts from the policy. 
-            The length of this list is 
-            `rollout_batch_size = n_prompts_per_rollout_batch * group_size`.
-        repeated_ground_truths: list[str], the ground truths for the examples. 
-            The length of this list is `rollout_batch_size`, 
-            because the ground truth for each example is repeated `group_size` times.
-        group_size: int, number of rollouts per group.
-        advantage_eps: float, epsilon to avoid division by zero
-            during group normalization.
-        normalize_by_std: bool, whether to normalize the rewards by
-            std(rewards).
+参数:
+    reward_fn: Callable[[str, str], dict[str, float]]，
+        根据标准答案（ground truths）对采样回答进行打分，
+        生成包含 "reward"、"format_reward" 和 "answer_reward" 键的字典。
+    rollout_responses: list[str]，策略模型生成的采样回答列表。
+        该列表的长度为 `rollout_batch_size = n_prompts_per_rollout_batch * group_size`。
+    repeated_ground_truths: list[str]，样本的标准答案列表。
+        该列表长度为 `rollout_batch_size`，因为每个样本的标准答案
+        都重复了 `group_size` 次（以对应同组内的多个采样）。
+    group_size: int，每个组（每个 Prompt）对应的采样回答数量。
+    advantage_eps: float，用于组归一化时防止除以零的 epsilon 值。
+    normalize_by_std: bool，是否使用标准差（std）对奖励值进行归一化。
 
-    Returns:
-        tuple[torch.Tensor, torch.Tensor, dict[str, float]]:
-            torch.Tensor of shape (rollout_batch_size,): 
-                group-normalized rewards for each rollout response.
-            torch.Tensor of shape (rollout_batch_size,): 
-                raw rewards for each rollout response.
-            dict[str, float]: metadata for the rewards of the rollout batch.
-                You may choose what you wish to log here
-                (some statistics of the rewards, etc.).
-    """
+返回:
+    tuple[torch.Tensor, torch.Tensor, dict[str, float]]:
+        形状为 (rollout_batch_size,) 的 torch.Tensor：
+            每个采样回答经组归一化后的奖励值（通常作为 Advantage）。
+        形状为 (rollout_batch_size,) 的 torch.Tensor：
+            每个采样回答的原始奖励值（Raw rewards）。
+        dict[str, float]: 采样批次（rollout batch）奖励值的元数据。
+            你可以选择在此记录任何统计信息（如奖励值的均值、方差等）。
+"""
     raise NotImplementedError
 
 
 def run_compute_entropy(logits: torch.Tensor) -> torch.Tensor:
     """Get the entropy of the logits (i.e., entropy of the final dimension)."""
+    return compute_entropy(logits)
     raise NotImplementedError
 
 
@@ -91,29 +90,28 @@ def run_get_response_log_probs(
     labels: torch.Tensor,
     return_token_entropy: bool,
 ) -> torch.Tensor:
-    """Get the conditional log-probs of the response given the prompt,
-        and optionally the entropy of the next token predictions.
+    """获取给定提示词（prompt）下回答（response）的条件对数概率，
+并可选择性地返回下个令牌预测的信息熵（entropy）。
 
-    Args:
-        model: PreTrainedModel, the model to score.
-        input_ids: torch.Tensor of shape (batch_size, sequence_length):
-            the tokenized prompt and output.
-        labels: torch.Tensor of shape (batch_size, sequence_length):
-            shifted input_ids.
-        return_token_entropy: bool, whether to return the entropy of the
-            next token predictions.
+参数:
+    model: PreTrainedModel，用于评分的模型。
+    input_ids: 形状为 (batch_size, sequence_length) 的 torch.Tensor：
+        分词后的提示词与输出内容。
+    labels: 形状为 (batch_size, sequence_length) 的 torch.Tensor：
+        偏移后的 input_ids（用于对齐预测目标）。
+    return_token_entropy: bool，是否返回下个令牌预测的信息熵。
 
-    Returns:
-        dict[str, torch.Tensor]:
-            "log_probs": torch.Tensor of shape (batch_size, sequence_length):
-                the conditional log-probs of the response given the prompt.
-                Note that we have not masked out the token indices corresponding
-                to the prompt or padding; that is done in the train loop.
-            "token_entropy": Optional[torch.Tensor] of shape (batch_size, sequence_length):
-                the entropy of the next token predictions. As with the log-probs,
-                we have not masked out the token indices corresponding to the prompt
-                or padding; that is done in the train loop.
-    """
+返回:
+    dict[str, torch.Tensor]:
+        "log_probs": 形状为 (batch_size, sequence_length) 的 torch.Tensor：
+            在给定提示词条件下，回答部分的条件对数概率。
+            注意：此处尚未屏蔽（mask）掉提示词或填充位（padding）对应的令牌索引；
+            该处理步骤将在训练循环中完成。
+        "token_entropy": 形状为 (batch_size, sequence_length) 的可选 torch.Tensor：
+            下个令牌预测的信息熵。与 log-probs 一样，此处尚未屏蔽掉提示词
+            或填充位对应的令牌索引；该处理步骤将在训练循环中完成。
+"""
+    return get_response_log_probs(model,input_ids,labels,return_token_entropy)
     raise NotImplementedError
 
 
@@ -178,21 +176,22 @@ def run_compute_policy_gradient_loss(
 
 
 def run_masked_mean(tensor: torch.Tensor, mask: torch.Tensor, dim: int | None = None) -> torch.Tensor:
-    """Compute the mean of the tensor along a dimension,
-    considering only the elements with mask value 1.
+    """计算张量在指定维度上的均值，
+且仅考虑掩码（mask）值为 1 的元素。
 
-    Args:
-        tensor: torch.Tensor, the tensor to compute the mean of.
-        mask: torch.Tensor, the mask. We only take the mean over
-            the elements with mask value 1.
-        dim: int | None, the dimension to compute the mean along.
-            If None, sum over all non-masked elements and average
-            by their total count.
+参数:
+    tensor: torch.Tensor，要计算均值的张量。
+    mask: torch.Tensor，掩码张量。我们仅对掩码值为 1
+        的元素进行均值计算。
+    dim: int | None，计算均值所沿的维度。
+        如果为 None，则对所有未被掩码（non-masked）的元素求和，
+        并除以它们的总数来计算平均值。
 
-    Returns:
-        torch.Tensor, the mean of the tensor along the specified
-            dimension, considering only the elements with mask value 1.
-    """
+返回:
+    torch.Tensor，在指定维度上仅考虑掩码值为 1
+        的元素所得到的张量均值。
+"""
+
     raise NotImplementedError
 
 def run_sft_microbatch_train_step(
@@ -203,6 +202,7 @@ def run_sft_microbatch_train_step(
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
     """Compute the policy gradient loss and backprop its gradients for a microbatch.
     """
+    return sft_microbatch_train_step(policy_log_probs,response_mask,gradient_accumulation_steps,normalize_constant)
     raise NotImplementedError
 
     
@@ -242,6 +242,7 @@ def run_grpo_microbatch_train_step(
         tuple[torch.Tensor, dict[str, torch.Tensor]]: 
             the policy gradient loss and its metadata.
     """
+
     raise NotImplementedError
 
 
@@ -251,22 +252,22 @@ def run_masked_normalize(
     dim: int | None = None,
     normalize_constant: float = 1.0,
 ) -> torch.Tensor:
-    """Sum over a dimension and normalize by a constant,
-    considering only the elements with mask value 1.
+    """在指定维度上求和并除以一个常数进行归一化，
+且仅考虑掩码（mask）值为 1 的元素。
 
-    Args:
-        tensor: torch.Tensor, the tensor to sum and normalize.
-        mask: torch.Tensor, the mask. We only consider elements
-            with mask value 1.
-        dim: int | None, the dimension to sum along before
-            normalization. If None, sum over all dimensions.
-        normalize_constant: float, the constant to divide by
-            for normalization.
+参数:
+    tensor: torch.Tensor，要进行求和及归一化的张量。
+    mask: torch.Tensor，掩码张量。我们仅考虑掩码值为 1
+        的元素。
+    dim: int | None，归一化前进行求和操作的维度。
+        如果为 None，则在所有维度上进行求和。
+    normalize_constant: float，用于归一化除法的常数。
 
-    Returns:
-        torch.Tensor, the normalized sum, where masked elements
-            (mask=0) don't contribute to the sum.
-    """
+返回:
+    torch.Tensor，归一化后的各项之和，
+        其中被掩码的元素（mask=0）不对求和结果产生贡献。
+"""
+    masked_normalize(tensor, mask, normalize_constant,dim)
     raise NotImplementedError
 
 

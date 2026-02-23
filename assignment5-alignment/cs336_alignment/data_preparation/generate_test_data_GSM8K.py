@@ -8,7 +8,7 @@ os.environ["HF_HUB_DISABLE_XET"] = "1"
 
 def main():
     # 设定输出目录
-    output_dir = "data/datasets/MATH"
+    output_dir = "train_data/datasets/MATH"
     os.makedirs(output_dir, exist_ok=True)
     val_output_path = os.path.join(output_dir, "validation.jsonl")
 
