@@ -267,7 +267,7 @@ def run_masked_normalize(
     torch.Tensor，归一化后的各项之和，
         其中被掩码的元素（mask=0）不对求和结果产生贡献。
 """
-    masked_normalize(tensor, mask, normalize_constant,dim)
+    return masked_normalize(tensor, mask, normalize_constant,dim)
     raise NotImplementedError
 
 

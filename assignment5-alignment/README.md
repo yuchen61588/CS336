@@ -17,7 +17,10 @@ As in previous assignments, we use `uv` to manage dependencies.
 ```
 uv sync --no-install-package flash-attn
 uv sync
-pip install --upgrade datasets fsspec huggingface_hub
+uv pip install --upgrade datasets fsspec huggingface_hub
+uv pip install -U datasets
+uv pip install -U wandb
+uv pip install -U transformers
 ```
 
 2. Run unit tests:

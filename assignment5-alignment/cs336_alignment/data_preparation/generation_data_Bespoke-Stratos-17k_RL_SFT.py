@@ -19,7 +19,11 @@ def format_bespoke_data(item: dict) -> tuple:
     解析 Bespoke 数据，返回 RL 格式和 SFT 格式的字典
     返回: (rl_record, sft_record)
     """
+    # 增加容错：兼容 messages 或 conversations 字段
     messages = item.get("messages", [])
+    if not messages:
+        messages = item.get("conversations", [])
+        
     question = ""
     assistant_response = ""
 
@@ -30,26 +34,34 @@ def format_bespoke_data(item: dict) -> tuple:
         elif msg["role"] == "assistant":
             assistant_response = msg["content"].strip()
 
-    # 提取标准答案 (Bespoke 数据集中通常包含 'solution' 或 'answer' 字段)
+    # === 关键修复：统一 Bespoke 的特殊标签到标准 R1 标签 ===
+    assistant_response = assistant_response.replace("<|begin_of_thought|>", "<think>")
+    assistant_response = assistant_response.replace("<|end_of_thought|>", "</think>")
+    assistant_response = assistant_response.replace("<|begin_of_solution|>", "<answer>")
+    assistant_response = assistant_response.replace("<|end_of_solution|>", "</answer>")
+
+    # 提取标准答案
     ground_truth = item.get("solution", "")
     if not ground_truth:
         ground_truth = item.get("answer", "")
 
-    # 如果原数据没有独立答案字段，就从 response 的 </think> 后面提取
+    # 从 response 的 </think> 后面提取答案 (此时标签已经替换完毕，可以命中)
     if not ground_truth and "</think>" in assistant_response:
-        ground_truth = assistant_response.split("</think>")[-1].replace("<answer>", "").replace("</answer>", "").strip()
+        ground_truth = assistant_response.split("</think>")[-1]
+
+    # 清理 ground_truth 中多余的 <answer> 标签，只保留纯文本答案
+    ground_truth = ground_truth.replace("<answer>", "").replace("</answer>", "").strip()
 
     # 构造 SFT prompt
     prompt = R1_ZERO_PROMPT.replace("{question}", question)
 
     # 构造 SFT response
-    # 注意：Bespoke 的回答自带 <think>，而我们的 prompt 结尾已经是 "Assistant: <think>\n"
-    # 所以为了防止出现两个 <think>，我们需要把原回答开头的 <think> 裁掉
-    response = assistant_response
+    response = assistant_response.strip()
+    # 裁掉开头的 <think>，防止与 prompt 重复
     if response.startswith("<think>"):
         response = response[len("<think>"):].lstrip()
 
-    # 如果 Bespoke 的结尾没有 <answer> 标签，我们顺手给它包上，保持格式一致
+    # 如果 Bespoke 的结尾没有 <answer> 标签，顺手给它包上
     if "<answer>" not in response and "</think>" in response:
         parts = response.split("</think>")
         reasoning = parts[0].strip()
@@ -64,7 +76,7 @@ def format_bespoke_data(item: dict) -> tuple:
     sft_record = {
         "prompt": prompt,
         "response": response,
-        "ground_truth": ground_truth  # SFT阶段也可以顺便存一个，方便算准确率
+        "ground_truth": ground_truth  
     }
 
     return rl_record, sft_record
@@ -82,7 +94,11 @@ def main():
 
     print("正在通过 HF-Mirror 加载 Bespoke-Stratos-17k 数据集...")
     # 使用 load_dataset 自动通过镜像拉取
-    dataset = load_dataset("HuggingFaceH4/Bespoke-Stratos-17k", split="train")
+    dataset = load_dataset(
+    "HuggingFaceH4/Bespoke-Stratos-17k", 
+    split="train",
+    download_mode="force_redownload", # 强制重新下载，忽略报错的本地缓存
+    )
 
     all_data = []
     print("正在解析数据格式...")

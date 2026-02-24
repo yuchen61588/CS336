@@ -24,6 +24,8 @@ def tokenize_prompt_and_output(
     input_ids_list = []
     labels_list = []
     response_mask_list = []
+    
+    
     for prompt, output in zip(prompt_strs,output_strs):
         #tokenizer()
         # {
@@ -33,19 +35,23 @@ def tokenize_prompt_and_output(
         # }
         prompt_tokens = tokenizer(prompt,add_special_tokens=False)["input_ids"]
         output_tokens = tokenizer(output, add_special_tokens=False)["input_ids"]
+        
         # 拼接 tokens
         combined_tokens = prompt_tokens + output_tokens
-        # input_ids: 截掉最后一个 token (形状: L-1)
-        inp = combined_tokens[:-1]
-        # labels: 截掉第一个 token (形状: L-1)，整体平移了一格
-        lbl = combined_tokens[1:]
+        # # input_ids: 截掉最后一个 token (形状: L-1)
+        # inp = combined_tokens[:-1]
+        # # labels: 截掉第一个 token (形状: L-1)，整体平移了一格
+        # lbl = combined_tokens[1:]
         # response_mask: 对于 prompt 部分为 0，对于 output 部分为 1
         # 注意预测第一个 output_token 是基于最后一个 prompt_token 的，所以在 label 中对应位置应该置为 1
-        mask = [0] * (len(prompt_tokens) - 1) + [1] * len(output_tokens)
-        input_ids_list.append(torch.tensor(inp,dtype = torch.long))# nn.Embedding类型规定
-        labels_list.append(torch.tensor(lbl, dtype=torch.long))
-        response_mask_list.append(torch.tensor(mask, dtype=torch.long))
+        # 先生成等长的 raw_mask，然后跟 labels 一样截掉第一个 token
+        raw_mask = [0] * len(prompt_tokens) + [1] * len(output_tokens)
 
+        input_ids_list.append(torch.tensor(combined_tokens,dtype = torch.long))# nn.Embedding类型规定
+        labels_list.append(torch.tensor( combined_tokens, dtype=torch.long))
+        response_mask_list.append(torch.tensor(raw_mask, dtype=torch.long))
+        # 只要是有真实 token 的地方，attention_mask 就是 1
+        
     # 获取掩码token 默认为0
     pad_token_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 0
 
@@ -53,17 +59,24 @@ def tokenize_prompt_and_output(
     input_ids_padded = torch.nn.utils.rnn.pad_sequence(
         input_ids_list,batch_first=True,padding_value=pad_token_id
     )
-    # label 的 padding_value 通常使用 -100 使得交叉熵忽略该位置
+    # label 的 padding_value 
     labels_padded = torch.nn.utils.rnn.pad_sequence(
-        labels_list, batch_first=True, padding_value=-100
+        labels_list, batch_first=True, padding_value=pad_token_id
     )
     mask_padded = torch.nn.utils.rnn.pad_sequence(
         response_mask_list, batch_first=True, padding_value=0
-    )
+    ) 
+   
+    shifted_inputs = input_ids_padded[:, :-1]
+    
+    shifted_labels = labels_padded[:, 1:]
+    shifted_response_masks = mask_padded[:, 1:]
+
     return {
-        "input_ids": input_ids_padded,
-        "labels": labels_padded,
-        "response_mask": mask_padded
+        "input_ids": shifted_inputs,
+       
+        "labels": shifted_labels,
+        "response_mask": shifted_response_masks
     }
 
 def compute_entropy(logits: torch.Tensor) -> torch.Tensor:
@@ -147,16 +160,18 @@ def sft_microbatch_train_step(
         normalize_constant=normalize_constant,
         dim = None # 在整个微批次所有 response token 上求和
     )
-
+    #根据batch缩放
+    batch_size = policy_log_probs.shape[0]
     # 考虑到梯度累积的影响，对 loss 进行缩放
-    scaled_loss = nll_sum / gradient_accumulation_steps
+    scaled_loss = nll_sum / gradient_accumulation_steps / batch_size
+    
     scaled_loss.backward()
     # metadata 中返回原始 loss (剥离计算图) 方便 logging
     metadata = {
         "loss": nll_sum.detach()
     }
 
-    return scaled_loss, metadata
+    return scaled_loss.detach(), metadata
 
 # 记录迭代数量
 

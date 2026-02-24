@@ -170,4 +170,5 @@ train_data/
 cuda-repo-wsl-ubuntu-*.deb
 output/
 checkpoints/
+wandb/
 
