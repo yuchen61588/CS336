@@ -53,5 +53,10 @@ python cs336_alignment/run_all_yaml.py \
   --base_config config/sft/sft_base.yaml \
   --exp_pattern "config/sft/qwen_2.5B_GSM8K*_*.yaml"
 
+python cs336_alignment/run_all_yaml.py \
+  --run_script cs336_alignment/sft_run.py \
+  --base_config config/sft/sft_base.yaml \
+  --exp_pattern "config/sft/qwen_2.5B_Bespoke17k*_*.yaml"
+
 
 
