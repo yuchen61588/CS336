@@ -1,11 +1,13 @@
 import os
+os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+os.environ["HF_HUB_DISABLE_XET"] = "1"
 import json
 import random
 from datasets import load_dataset
+from cs336_alignment.drgrpo_grader import  extract_answer
 
 # 强制使用国内镜像并禁用可能报错的 XetHub
-os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
-os.environ["HF_HUB_DISABLE_XET"] = "1"
+
 
 # r1_zero 提示词模板
 R1_ZERO_PROMPT = """A conversation between User and Assistant. The User asks a question, and the Assistant solves it. The Assistant first thinks about the reasoning process in the mind and then provides the User with the answer. The reasoning process is enclosed within <think> </think> and answer is enclosed within <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>.
@@ -49,8 +51,12 @@ def format_bespoke_data(item: dict) -> tuple:
     if not ground_truth and "</think>" in assistant_response:
         ground_truth = assistant_response.split("</think>")[-1]
 
-    # 清理 ground_truth 中多余的 <answer> 标签，只保留纯文本答案
     ground_truth = ground_truth.replace("<answer>", "").replace("</answer>", "").strip()
+    if "\\boxed" in ground_truth:
+        # 使用你 grader 里的提取逻辑，防止把整个解析段落当成答案
+        extracted = extract_answer(ground_truth) 
+        if extracted:
+            ground_truth = extracted
 
     # 构造 SFT prompt
     prompt = R1_ZERO_PROMPT.replace("{question}", question)
@@ -69,6 +75,7 @@ def format_bespoke_data(item: dict) -> tuple:
         response = f"{reasoning}\n</think>\n<answer> {final_answer} </answer>"
 
     rl_record = {
+        "prompt": prompt,
         "question": question,
         "answer": ground_truth
     }
@@ -97,13 +104,13 @@ def main():
     dataset = load_dataset(
     "HuggingFaceH4/Bespoke-Stratos-17k", 
     split="train",
-    download_mode="force_redownload", # 强制重新下载，忽略报错的本地缓存
+    # download_mode="force_redownload", # 强制重新下载，忽略报错的本地缓存
     )
 
     all_data = []
     print("正在解析数据格式...")
     for item in dataset:
-        rl_record, sft_record = format_bespoke_data(item)
+        rl_record, sft_record = format_bespoke_data(item) # type: ignore
         if rl_record["question"] and rl_record["answer"]:  # 确保数据完整
             all_data.append((rl_record, sft_record))
 

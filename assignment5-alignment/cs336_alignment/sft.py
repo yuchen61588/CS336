@@ -2,7 +2,8 @@ import os
 from typing import List,Dict,Optional,Tuple
 import torch
 import torch.nn.functional as F
-from transformers import PreTrainedTokenizer,PreTrainedModel
+from transformers.tokenization_utils import PreTrainedTokenizer
+from transformers.modeling_utils import PreTrainedModel
 import wandb
 import numpy as np
 
@@ -10,7 +11,8 @@ import numpy as np
 def tokenize_prompt_and_output(
         prompt_strs:List[str],
         output_strs:List[str],
-        tokenizer:PreTrainedTokenizer)->Dict[str, torch.Tensor]:
+        tokenizer:PreTrainedTokenizer,max_seq_length: int = 1024)->Dict[str, torch.Tensor]:
+          
     """
     Returns:
         dict[str, torch.Tensor]: 包含分词后数据的字典。假设 `prompt_and_output_lens` 是合并后字符串的长度列表：
@@ -46,6 +48,9 @@ def tokenize_prompt_and_output(
         # 注意预测第一个 output_token 是基于最后一个 prompt_token 的，所以在 label 中对应位置应该置为 1
         # 先生成等长的 raw_mask，然后跟 labels 一样截掉第一个 token
         raw_mask = [0] * len(prompt_tokens) + [1] * len(output_tokens)
+        if len(combined_tokens) > max_seq_length:
+            combined_tokens = combined_tokens[:max_seq_length]
+            raw_mask = raw_mask[:max_seq_length]
 
         input_ids_list.append(torch.tensor(combined_tokens,dtype = torch.long))# nn.Embedding类型规定
         labels_list.append(torch.tensor( combined_tokens, dtype=torch.long))
@@ -79,18 +84,17 @@ def tokenize_prompt_and_output(
         "response_mask": shifted_response_masks
     }
 
-def compute_entropy(logits: torch.Tensor) -> torch.Tensor:
+def compute_entropy(all_log_probs: torch.Tensor) -> torch.Tensor:
     """
     Returns:
         他声称的时一个vocab词表，对每个词表的概率
         torch.Tensor: 形状为 (batch_size, sequence_length)。
         计算出的每个 next-token 预测的熵值（Entropy）。
     """
-    log_probs = F.log_softmax(logits , dim=-1)
-    probs = torch.exp(log_probs)
-
-    entropy = -torch.sum(probs * log_probs, dim=-1)
-    return entropy
+    probs = torch.exp(all_log_probs)
+    entropy = -torch.sum(probs * all_log_probs, dim=-1)
+    # 处理可能的 NaN (如 log(0) 带来的问题)
+    return torch.nan_to_num(entropy, nan=0.0)
 
 def get_response_log_probs(  model: PreTrainedModel, input_ids: torch.Tensor, labels: torch.Tensor, return_token_entropy: bool = False, ) -> dict[str, torch.Tensor]:
     """
@@ -101,23 +105,45 @@ def get_response_log_probs(  model: PreTrainedModel, input_ids: torch.Tensor, la
         - 'token_entropy' (torch.Tensor, 可选): 形状为 (batch_size, sequence_length)。
           每个位置上模型预测分布的逐 token 熵（仅在参数 return_token_entropy=True 时返回）。
     """
-    logits = model(input_ids).logits
-    log_probs = F.log_softmax(logits,dim=-1)
+    outputs = model(input_ids)
+    logits = outputs.logits  # (batch_size, seq_len, vocab_size)
+    batch_size, seq_len, vocab_size = logits.shape
+   
 
     # 准备 gather_labels：防止 labels 中的 padding 值 (如 -100) 导致 gather 越界
     gather_labels = labels.clone()
     gather_labels[gather_labels == -100] = 0
 
-    gathered_log_probs = torch.gather(
-        log_probs, dim=-1, index=gather_labels.unsqueeze(-1)
-    ).squeeze(-1)
-
-    result = {"log_probs": gathered_log_probs}
-
-    if return_token_entropy:
-        result["token_entropy"] = compute_entropy(logits)
-
-    return result
+    if not return_token_entropy:
+        # 🌟 极致优化版：关闭 Entropy 时，直接走 CrossEntropy，节约 80% 显存！
+        # logits 展平: (B*L, V), labels 展平: (B*L)
+        per_token_loss = F.cross_entropy(
+            logits.view(-1, vocab_size), 
+            labels.view(-1), 
+            reduction='none',
+            ignore_index=-100  # 直接让 PyTorch 忽略 padding
+        )
+        # 变回 (B, L) 并取负号得到 log_prob
+        selected_log_probs = -per_token_loss.view(batch_size, seq_len)
+        return {"log_probs": selected_log_probs}
+        
+    else:
+        # ⚠️ 必须开启 Entropy 时：转 FP32 防溢出，且坚决只算一次 log_softmax
+        logits_fp32 = logits.to(torch.float32)
+        all_log_probs = F.log_softmax(logits_fp32, dim=-1)
+        
+        # 1. 提取目标 token 概率
+        selected_log_probs = torch.gather(
+            all_log_probs, dim=-1, index=gather_labels.unsqueeze(-1)
+        ).squeeze(-1)
+        
+        # 2. 复用 all_log_probs 计算熵，而不是重新传入 logits
+        token_entropy = compute_entropy(all_log_probs)
+        
+        return {
+            "log_probs": selected_log_probs,
+            "token_entropy": token_entropy
+        }
 
 # 掩码归一化,将对数熵与掩码结合求和
 def masked_normalize(
@@ -183,11 +209,12 @@ def log_generations(
         ground_truths: List[str],
         token_entropies: List[torch.Tensor],  # 每个元素的形状为 (seq_len,)
         reward_fn,
-        step: int
+        step: int,
+        save_logs: Optional[str] = None,
+        yaml_config_name: Optional[str] = None
 ):
     """
-    一个日志辅助函数，用于将模型生成结果记录到 wandb (或终端)。
-    这里假设模型输出已经由 vLLM 或 HF generate 获得。
+    一个日志辅助函数，用于将模型生成结果及分类统计记录到 wandb (或终端)。
     """
     log_data = []
     total_rewards = []
@@ -198,20 +225,47 @@ def log_generations(
     incorrect_lengths = []
     all_lengths = []
 
+    # ===============================
+    # 新增：定义各类别的计数器
+    # ===============================
+    category_1 = 0  # 格式对, 答案对
+    category_2 = 0  # 格式对, 答案错
+    category_3 = 0  # 格式错, 答案错
+    category_4 = 0  # 格式错, 答案对 (兜底情况)
+
     for prompt, response, truth, entropies in zip(prompts, generated_responses, ground_truths, token_entropies):
         # 1. 计算各项奖励分数
         rewards = reward_fn(response, truth)
-        total_rewards.append(rewards["reward"])
-        format_rewards.append(rewards["format_reward"])
-        answer_rewards.append(rewards["answer_reward"])
+        r_total = rewards.get("reward", 0.0)
+        r_format = rewards.get("format_reward", 0.0)
+        r_answer = rewards.get("answer_reward", 0.0)
+        
+        total_rewards.append(r_total)
+        format_rewards.append(r_format)
+        answer_rewards.append(r_answer)
+
+        # ===============================
+        # 新增：判断类别逻辑 (假设分数 > 0 代表正确)
+        # ===============================
+        is_format_correct = r_format > 0
+        is_answer_correct = r_answer > 0
+
+        if is_format_correct and is_answer_correct:
+            category_1 += 1
+        elif is_format_correct and not is_answer_correct:
+            category_2 += 1
+        elif not is_format_correct and not is_answer_correct:
+            category_3 += 1
+        else:
+            category_4 += 1
 
         # 2. 计算平均 token 熵
         avg_entropy = entropies.mean().item() if len(entropies) > 0 else 0.0
 
         # 3. 统计生成长度
-        resp_len = len(response)  # 这里可替换为 tokenizer(response) 的长度
+        resp_len = len(response)
         all_lengths.append(resp_len)
-        if rewards["reward"] > 0:
+        if r_total > 0:
             correct_lengths.append(resp_len)
         else:
             incorrect_lengths.append(resp_len)
@@ -219,9 +273,60 @@ def log_generations(
         # 4. 汇总到单条记录，用于展示
         log_data.append([
             prompt, response, truth,
-            rewards["format_reward"], rewards["answer_reward"], rewards["reward"],
+            r_format, r_answer, r_total,
             avg_entropy
         ])
+
+    # ===============================
+    # 新增：终端打印统计结果
+    # ===============================
+    total_samples = len(prompts)
+    print(f"\n[Step {step}] === {yaml_config_name} 评估结果统计 ===")
+    print(f"总样本数: {total_samples}")
+    if total_samples > 0:
+        print(f"类别 1 (格式对, 答案对): {category_1} ({category_1/total_samples*100:.2f}%)")
+        print(f"类别 2 (格式对, 答案错): {category_2} ({category_2/total_samples*100:.2f}%)")
+        print(f"类别 3 (格式错, 答案错): {category_3} ({category_3/total_samples*100:.2f}%)")
+        if category_4 > 0:
+            print(f"类别 4 (格式错, 答案对): {category_4} ({category_4/total_samples*100:.2f}%)")
+    else:
+        print("警告：验证集样本数为 0！")
+    print("===============================\n")
+    # ===============================
+    # 📝 新增：写入本地文本文件 (追加模式)
+    # ===============================
+    if save_logs:
+        # 自动创建父级目录 (例如如果 save_logs 是 "output/sft_logs.txt"，就会自动创建 output 文件夹)
+        os.makedirs(os.path.dirname(save_logs), exist_ok=True)
+        
+        # 使用 'a' 模式（追加模式）打开文件
+        with open(save_logs, "a", encoding="utf-8") as f:
+            f.write(f"\n{'='*50}\n")
+            f.write(f"🚀 实验名称: {yaml_config_name} | 训练步数 (Step): {step}\n")
+            f.write(f"{'='*50}\n")
+            
+            f.write("【🏆 奖励得分统计】\n")
+            f.write(f"平均总奖励 (Total Reward):   {np.mean(total_rewards) if total_rewards else 0.0:.4f}\n")
+            f.write(f"平均格式奖励 (Format Reward): {np.mean(format_rewards) if format_rewards else 0.0:.4f}\n")
+            f.write(f"平均答案奖励 (Answer Reward): {np.mean(answer_rewards) if answer_rewards else 0.0:.4f}\n\n")
+            
+            f.write("【📏 生成长度统计】\n")
+            f.write(f"平均生成总长度:     {np.mean(all_lengths) if all_lengths else 0.0:.2f} tokens\n")
+            f.write(f"正确回答平均长度:   {np.mean(correct_lengths) if correct_lengths else 0.0:.2f} tokens\n")
+            f.write(f"错误回答平均长度:   {np.mean(incorrect_lengths) if incorrect_lengths else 0.0:.2f} tokens\n\n")
+            
+            f.write("【📊 模型表现占比】\n")
+            f.write(f"✅ 格式对 & 答案对: {(category_1 / total_samples * 100) if total_samples > 0 else 0.0:.2f}%\n")
+            f.write(f"⚠️ 格式对 & 答案错: {(category_2 / total_samples * 100) if total_samples > 0 else 0.0:.2f}%\n")
+            f.write(f"❌ 格式错 & 答案错: {(category_3 / total_samples * 100) if total_samples > 0 else 0.0:.2f}%\n")
+            f.write(f"🍀 格式错 & 答案对: {(category_4 / total_samples * 100) if total_samples > 0 else 0.0:.2f}%\n\n")
+            
+            f.write("【🔢 具体生成数量】\n")
+            f.write(f"✅ 格式对 & 答案对: {category_1} 条\n")
+            f.write(f"⚠️ 格式对 & 答案错: {category_2} 条\n")
+            f.write(f"❌ 格式错 & 答案错: {category_3} 条\n")
+            f.write(f"🍀 格式错 & 答案对: {category_4} 条\n")
+            
 
     # 将文本数据转换为 WandB Table
     table = wandb.Table(
@@ -229,17 +334,28 @@ def log_generations(
         columns=["Prompt", "Response", "Ground Truth", "Format Reward", "Answer Reward", "Total Reward", "Avg Entropy"]
     )
 
-    # 记录统计平均值
+    # 记录统计平均值和占比到 WandB
     wandb.log({
         "eval/generations": table,
-        "eval/mean_reward": np.mean(total_rewards),
-        "eval/mean_format_reward": np.mean(format_rewards),
-        "eval/mean_answer_reward": np.mean(answer_rewards),
-        "eval/mean_response_length": np.mean(all_lengths),
+        "eval/mean_reward": np.mean(total_rewards) if total_rewards else 0.0,
+        "eval/mean_format_reward": np.mean(format_rewards) if format_rewards else 0.0,
+        "eval/mean_answer_reward": np.mean(answer_rewards) if answer_rewards else 0.0,
+        "eval/mean_response_length": np.mean(all_lengths) if all_lengths else 0.0,
         "eval/mean_correct_response_length": np.mean(correct_lengths) if correct_lengths else 0.0,
         "eval/mean_incorrect_response_length": np.mean(incorrect_lengths) if incorrect_lengths else 0.0,
-    }, step=step)
+        
+        # 新增：将占比也推送到 WandB (方便查看折线图趋势)
+        "eval/category_1_ratio(%)": (category_1 / total_samples * 100) if total_samples > 0 else 0.0,
+        "eval/category_2_ratio(%)": (category_2 / total_samples * 100) if total_samples > 0 else 0.0,
+        "eval/category_3_ratio(%)": (category_3 / total_samples * 100) if total_samples > 0 else 0.0,
 
+
+        # 📊 绝对数量指标 (Count) - 用于排查验证集抽样是否有偏差
+        "eval/count_format_O_answer_O": category_1,
+        "eval/count_format_O_answer_X": category_2,
+        "eval/count_format_X_answer_X": category_3,
+        "eval/count_format_X_answer_O": category_4,
+    }, step=step)
 
 
 

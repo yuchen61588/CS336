@@ -10,8 +10,13 @@ import argparse
 import collections.abc
 from tqdm import tqdm
 from torch.utils.data import DataLoader
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers.models.auto.modeling_auto import AutoModelForCausalLM
+from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.optimization import get_cosine_schedule_with_warmup
+import gc
+from vllm import LLM, SamplingParams
+from vllm.distributed.parallel_state import destroy_model_parallel
+                    
 
 # ==========================================
 # 导入你的辅助模块 (请确保这些文件在同级目录)
@@ -111,6 +116,9 @@ def main():
 
     cfg = load_and_validate_config(args)
 
+    max_seq_length = cfg["model"].get("max_length", 2048)
+    print(f"📏 当前实验配置的最大截断长度 (max_length) 为: {max_seq_length}")
+
     # ==========================================
     # WandB 初始化 (支持断点续传)
     # ==========================================
@@ -143,7 +151,8 @@ def main():
     lr = float(cfg["training"]["learning_rate"])
     epochs = cfg["training"]["epochs"]
     max_grad_norm = cfg["training"]["max_grad_norm"]
-    eval_every = cfg["training"]["eval_every_n_steps"]
+    num_examples = cfg["data"]["num_train_examples"]
+    eval_every = epochs * num_examples // (batch_size * grad_acc_steps) if "eval_every_n_steps" not in cfg["training"] else cfg["training"]["eval_every_n_steps"]
 
     # ==========================================
     # 模型与 Tokenizer 加载 (支持断点权重加载)
@@ -163,6 +172,8 @@ def main():
         attn_implementation="flash_attention_2"
     ).to(device)
 
+    policy_model.gradient_checkpointing_enable()  #GPU 内存优化
+
     # ==========================================
     # 数据加载
     # ==========================================
@@ -175,13 +186,25 @@ def main():
     val_data = load_and_filter_data(cfg["data"]["val_path"], cfg["data"]["num_val_examples"])
 
     train_loader = DataLoader(
-        train_data, batch_size=batch_size, shuffle=True, collate_fn=string_collate_fn, drop_last=True
+        train_data, batch_size=batch_size, shuffle=True, collate_fn=string_collate_fn, drop_last=True # type: ignore
     )
 
     # ==========================================
     # 优化器与 Cosine Scheduler
     # ==========================================
     optimizer = torch.optim.AdamW(policy_model.parameters(), lr=lr)
+
+    if args.resume_from:
+        opt_path = os.path.join(args.resume_from, "optimizer.pt")
+        if os.path.exists(opt_path):
+            print(f"🔄 正在恢复优化器状态: {opt_path}")
+            optimizer.load_state_dict(torch.load(opt_path, map_location=device))
+            # 防止优化器里的 tensor 不在当前设备上
+            for state in optimizer.state.values():
+                for k, v in state.items():
+                    if isinstance(v, torch.Tensor):
+                        state[k] = v.to(device)
+    
 
     steps_per_epoch = len(train_loader) // grad_acc_steps
     total_global_steps = steps_per_epoch * epochs
@@ -219,7 +242,7 @@ def main():
             responses = batch["response"]
 
             # (A) 分词与生成掩码
-            tokens_dict = tokenize_prompt_and_output(prompts, responses, tokenizer)
+            tokens_dict = tokenize_prompt_and_output(prompts, responses, tokenizer, max_seq_length=max_seq_length)
             input_ids = tokens_dict["input_ids"].to(device)
             labels = tokens_dict["labels"].to(device)
             response_mask = tokens_dict["response_mask"].to(device)
@@ -276,83 +299,111 @@ def main():
                 # ==========================================
                 # (E) 验证与模型生成阶段 (4090 防 OOM 单卡原生推理)
                 # ==========================================
-                if global_step % eval_every == 0:
+                if epoch == epochs - 1 and (step_idx + 1) == len(train_loader):
+                    
+                    progress_bar.write(f"\n[Step {global_step}] 准备启动 vLLM 验证，正在进行显存置换...")
+                    
+                    # 1. 保存当前实时权重到一个临时目录
+                    temp_eval_dir = os.path.join(cfg["model"]["checkpoint_dir"], "temp_vllm_eval")
+                    os.makedirs(temp_eval_dir, exist_ok=True)
+                    policy_model.save_pretrained(temp_eval_dir)
+                    tokenizer.save_pretrained(temp_eval_dir)
+
+                    # 2. 释放训练模型显存 (将其移至 CPU 并清空 CUDA 缓存)
+                    policy_model.to("cpu")
+                    optimizer_state_dict = optimizer.state_dict() # 如果极度缺显存，优化器也可能需要处理，这里暂时只动模型
                     torch.cuda.empty_cache()
-                    progress_bar.write(f"\n[Step {global_step}] 开始原生批量生成验证...")
-                    policy_model.eval()
+                    gc.collect()
+
+                    progress_bar.write(f"显存已释放，启动 vLLM 引擎...")
+
+                    # 3. 初始化 vLLM (关键：必须严格限制 gpu_memory_utilization，防止 OOM)
+                    # 4090 是 24G，设为 0.4 意味着 vLLM 最多只能用约 9.6G 显存
+                    llm = LLM(
+                        model=temp_eval_dir,
+                        trust_remote_code=True,
+                        tensor_parallel_size=1,
+                        gpu_memory_utilization=0.4 # ⚠️ 如果报错 OOM，调低这个值(如 0.3)；如果提示 KV cache 空间不足，调高这个值(如 0.5)
+                    )
+
+                    # vLLM 直接支持 Stop Token，不需要事后切分字符串了
+                    sampling_params = SamplingParams(
+                        temperature=1.0,
+                        top_p=1.0,
+                        max_tokens=1024,
+                        stop=["</answer>"] 
+                    )
 
                     val_prompts = [item["prompt"] for item in val_data]
                     val_truths = [item["ground_truth"] for item in val_data]
 
-                    generated_texts = []
-                    val_entropies = []
+                    # 4. vLLM 批量生成 (自带进度条，极其丝滑)
+                    outputs = llm.generate(val_prompts, sampling_params)
+                    
+                    # 提取生成的文本并自动补齐我们设定的 Stop Token
+                    generated_texts = [
+                        (out.outputs[0].text + "</answer>") if out.outputs[0].finish_reason == "stop" else out.outputs[0].text
+                        for out in outputs
+                    ]
 
-                    # 验证必须左侧填充 。这样模型才能找到结尾 输入 3 个不同的 Prompt 进行批量生成，为了补齐长度在右边塞满了 <pad>，模型就不知道真正的结尾在哪了(通过结尾预测)。换成 left，所有的真实提问都会靠右对齐，模型就能准确地顺着最后一个词开始生成。
-                    tokenizer.padding_side = "left"
+                    # 5. 销毁 vLLM，归还显存！
+                    progress_bar.write("vLLM 生成完毕，正在销毁推理引擎并恢复训练环境...")
+                    del llm
+                    destroy_model_parallel()
+                    torch.cuda.empty_cache()
+                    gc.collect()
 
-                    with torch.no_grad():
-                        for i in range(0, len(val_prompts), eval_batch_size):
-                            batch_prompts = val_prompts[i: i + eval_batch_size]
-                            inputs = tokenizer(batch_prompts, return_tensors="pt", padding=True).to(device)
-                            input_lengths = inputs.input_ids.shape[1]
+                    # 6. 把策略模型搬回 GPU，恢复原样
+                    policy_model.to(device)
+                    policy_model.eval()
 
-                            output_ids = policy_model.generate(
-                                **inputs,
-                                max_new_tokens=1024,
-                                temperature=1.0,
-                                top_p=1.0,
-                                do_sample=True,
-                                pad_token_id=tokenizer.pad_token_id,
-                                eos_token_id=tokenizer.eos_token_id,
-                            )
-
-                            generated_ids = output_ids[:, input_lengths:]
-                            batch_texts = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)
-                            # 清理幻觉数据 如果模型生成了 ...我的回答完毕。</answer> 用户提问：...，这行代码会以 </answer> 为界把字符串切开，只保留前半部分，然后再把 </answer> 拼回去。
-                            cleaned_texts = [
-                                text.split("</answer>")[0] + "</answer>" if "</answer>" in text else text
-                                for text in batch_texts
-                            ]
-                            generated_texts.extend(cleaned_texts)
-
-                            # 算熵时恢复右侧填充
-                            tokenizer.padding_side = original_padding_side
-                            for vp, vg in zip(batch_prompts, cleaned_texts):
-                                t_data = tokenize_prompt_and_output([vp], [vg], tokenizer)
-                                out_dict = get_response_log_probs(
-                                    policy_model,
-                                    t_data["input_ids"].to(device),
-                                    t_data["labels"].to(device),
-                                    return_token_entropy=True
-                                )
-                                mask = t_data["response_mask"].to(device)
-                                val_entropies.append(out_dict["token_entropy"][mask == 1])
-                            tokenizer.padding_side = "left"
-
+                    # 7. 算熵阶段：统一切换回右侧填充 (与原来逻辑一致)
                     tokenizer.padding_side = original_padding_side
+                    val_entropies = []
+                    
+                    with torch.no_grad():
+                        for vp, vg in zip(val_prompts, generated_texts):
+                            t_data = tokenize_prompt_and_output([vp], [vg], tokenizer)
+                            out_dict = get_response_log_probs(
+                                policy_model,
+                                t_data["input_ids"].to(device),
+                                t_data["labels"].to(device),
+                                return_token_entropy=True
+                            )
+                            mask = t_data["response_mask"].to(device)
+                            val_entropies.append(out_dict["token_entropy"][mask == 1])
+
                     eval_step += 1
+                    save_logs = cfg["training"].get("save_logs","output/sft_logs.txt")
                     log_generations(
                         prompts=val_prompts,
                         generated_responses=generated_texts,
                         ground_truths=val_truths,
                         token_entropies=val_entropies,
                         reward_fn=r1_zero_reward_fn,
-                        step=eval_step
+                        step=global_step,
+                        save_logs=save_logs,
+                        yaml_config_name = os.path.basename(args.exp_config).replace(".yaml", "")
                     )
-                    progress_bar.write(
-
-                        "[Evaluation] 验证完成，继续训练...")
+                    
+                    progress_bar.write("[Evaluation] 验证完成，继续训练...")
                     torch.cuda.empty_cache()
                     policy_model.train()
 
         # ==========================================
         # (F) Epoch 结束，保存 Checkpoint
         # ==========================================
-        ckpt_dir = os.path.join(cfg["model"]["checkpoint_dir"], f"epoch_{epoch + 1}")
-        os.makedirs(ckpt_dir, exist_ok=True)
-        progress_bar.write(f"💾 正在保存 Epoch {epoch + 1} 的断点至 {ckpt_dir} ...")
-        policy_model.save_pretrained(ckpt_dir)
-        tokenizer.save_pretrained(ckpt_dir)
+        current_epoch = epoch + 1
+        save_freq = cfg["training"].get("save_every_n_epochs", 1)
+        if current_epoch % save_freq == 0:
+            ckpt_dir = os.path.join(cfg["model"]["checkpoint_dir"], f"epoch_{current_epoch}")
+            os.makedirs(ckpt_dir, exist_ok=True)
+            progress_bar.write(f"💾 触发保存：正在保存 Epoch {current_epoch} 的断点至 {ckpt_dir} ...")
+            policy_model.save_pretrained(ckpt_dir)
+            tokenizer.save_pretrained(ckpt_dir)
+            torch.save(optimizer.state_dict(), os.path.join(ckpt_dir, "optimizer.pt"))
+        else:
+            progress_bar.write(f"⏩ 跳过保存：当前是 Epoch {current_epoch}，策略设置为每 {save_freq} 个 Epoch 保存一次。")
 
     # ==========================================
     # (G) 训练彻底结束，保存最终模型

@@ -1,6 +1,9 @@
 import os
 from huggingface_hub import snapshot_download
 
+os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+os.environ["HF_HUB_DISABLE_XET"] = "1"
+
 local_model_dir = "train_data/models/Qwen2.5-Math-1.5B"
 os.makedirs(local_model_dir, exist_ok=True)
 

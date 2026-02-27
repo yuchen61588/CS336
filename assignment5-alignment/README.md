@@ -19,8 +19,11 @@ uv sync --no-install-package flash-attn
 uv sync
 uv pip install --upgrade datasets fsspec huggingface_hub
 uv pip install -U datasets
-uv pip install -U wandb
-uv pip install -U transformers
+uv pip install --upgrade wandb
+
+export UV_INDEX_URL="https://pypi.tuna.tsinghua.edu.cn/simple"
+uv cache clean
+实在不行把venv删了
 ```
 
 2. Run unit tests:
@@ -40,10 +43,15 @@ source .venv/bin/activate
 vim ~/.bashrc
 
 # baseline命令
-python cs336_alignment/math_baseline.py --model_name qwen_1.5b
+python cs336_alignment/math_baseline.py --model_name qwen_1.5b --dataset_type GSM8K
+python cs336_alignment/math_baseline.py --model_name qwen_1.5b --dataset_type Bespoke17k
 # sft 数据集训练
 python cs336_alignment/data_preparation/generation_data_Bespoke-Stratos-17k_RL_SFT.py
 python cs336_alignment/sft_run.py --base_config config/sft/sft_base.yaml --exp_config config/sft/qwen_2.5B_bespoke_128_false.yaml
+python cs336_alignment/run_all_yaml.py \
+  --run_script cs336_alignment/sft_run.py \
+  --base_config config/sft/sft_base.yaml \
+  --exp_pattern "config/sft/qwen_2.5B_GSM8K*_*.yaml"
 
 
 

@@ -8,10 +8,10 @@ from cs336_alignment.drgrpo_grader import r1_zero_reward_fn
 
 
 MODEL_REGISTRY = {
-    "qwen_1.5b": "data/models/Qwen2.5-Math-1.5B",
+    "qwen_1.5b": "train_data/models/Qwen2.5-Math-1.5B",
     # 兼容图片和文档的 Llama 3.1 路径，请根据集群实际情况微调最后的文件夹名
-    "llama_3.1_8b": "data/models/Llama-3.1", 
-    "llama_3.3_70b": "data/models/Llama-3.3-70B-Instruct"
+    "llama_3.1_8b": "train_data/models/Llama-3.1", 
+    "llama_3.3_70b": "train_data/models/Llama-3.3-70B-Instruct"
 }
 
 def evaluate_vllm(
@@ -37,7 +37,7 @@ def evaluate_vllm(
     for item, output in zip(dataset, outputs):
        generated_text = output.outputs[0].text
 
-       ground_truth = item["answer"]
+       ground_truth = item.get("ground_truth", "")
        reward = reward_fn(generated_text, ground_truth)
 
        format_reward = reward.get("format_reward", 0.0)
@@ -51,9 +51,8 @@ def evaluate_vllm(
            category_3 += 1
 
        results.append({
-           "question": item["question"],
-           "generated_text": generated_text,
            "prompt": output.prompt,
+           "generated_text": generated_text,
            "ground_truth": ground_truth,
            "format_reward": format_reward,
            "answer_reward": answer_reward,
@@ -73,20 +72,22 @@ def evaluate_vllm(
 
 def main():
     
-    parser = argparse.ArgumentParser(description="运行 MATH 数据集的零样本基线评估") 
+    parser = argparse.ArgumentParser(description="运行数据集的零样本基线评估") 
     parser.add_argument("--model_name", 
                         type=str, required=True, 
                         choices=MODEL_REGISTRY.keys(), 
                         help="要评估的模型名称")
+    parser.add_argument("--dataset_type", type=str, default="GSM8K", choices=["Bespoke17k", "GSM8K"])
     args = parser.parse_args()
     model_path = MODEL_REGISTRY[args.model_name]
-    output_dir = "data/output/math_baseline_results"
-    data_path = "data/datasets/MATH/validation.jsonl" 
+    output_dir = "train_data/output/math_baseline_results"
+    data_path = f"train_data/datasets/{args.dataset_type}/validation.jsonl" 
     prompt_file_path = "cs336_alignment/prompts/r1_zero.prompt"
     os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, f"{args.model_name}.json")
+    output_path = os.path.join(output_dir, f"{args.model_name}_{args.dataset_type}.json")
 
     print(f"[*] 选定模型: {args.model_name}")
+    print(f"[*] 数据集类型: {args.dataset_type}")
     print(f"[*] 模型路径: {model_path}")
     print(f"[*] 结果将保存至: {output_path}")
 
@@ -102,7 +103,7 @@ def main():
         for line in f:
             dataset.append(json.loads(line))
     # 将格式替换为问题
-    prompts = [prompt_template.replace("{question}", item["question"]) for item in dataset]
+    prompts = [item["prompt"] for item in dataset]
     #预设要求
     sampling_params = SamplingParams(
         temperature=1.0,

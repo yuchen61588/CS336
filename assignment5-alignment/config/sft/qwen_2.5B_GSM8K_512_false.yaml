@@ -1,0 +1,15 @@
+# exp_bespoke_256.yaml (具体的实验名片)
+
+model:
+  model_id: "train_data/models/Qwen2.5-Math-1.5B"
+  output_dir: "output/qwen_sft_GSM8K_512_final"
+  checkpoint_dir: "checkpoints/qwen_sft_GSM8K_512_checkpoints" # [新增] 断点检查点保存路径
+  max_seq_length: 1024                      # 训练最大序列长度
+data:
+  train_path: "train_data/datasets/GSM8K/sft.jsonl"
+  val_path: "train_data/datasets/GSM8K/validation.jsonl"
+  num_train_examples: 512
+  filter_correct_only: false       # 第一阶段不过滤，照单全收
+  num_val_examples: 200            # 每次评估 200 条
+wandb:
+  run_name: "qwen_sft_GSM8K_512"
