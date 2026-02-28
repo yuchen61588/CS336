@@ -41,7 +41,7 @@ def format_bespoke_data(item: dict, tokenizer, stats_dict: dict) -> tuple:
             raw_response = msg["content"].strip()
 
     if not question or not raw_response:
-        stats_dict["missing_qa"] += 1
+        stats_dict["missing_qa"] = stats_dict.get("missing_qa", 0) + 1
         return None, None
 
     # 标准化标签
@@ -60,7 +60,7 @@ def format_bespoke_data(item: dict, tokenizer, stats_dict: dict) -> tuple:
         ground_truth = item.get("answer", "")
 
     if not ground_truth:
-        stats_dict["missing_ground_truth"] += 1
+        stats_dict["missing_ground_truth"] =  stats_dict.get("missing_ground_truth",0)+1
         return None, None
 
     # 调用重构后的清洗黑盒
