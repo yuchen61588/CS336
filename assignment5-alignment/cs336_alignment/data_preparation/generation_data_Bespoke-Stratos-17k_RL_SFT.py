@@ -95,7 +95,7 @@ def format_bespoke_data(item: dict, tokenizer, stats_dict: dict) -> tuple:
 
 
 def main():
-    output_dir = "train_data/datasets/Bespoke17k_Cleaned"
+    output_dir = "train_data/datasets/Bespoke17k_Platinum"
     os.makedirs(output_dir, exist_ok=True)
 
     train_rl_path = os.path.join(output_dir, "train.jsonl")
@@ -103,17 +103,24 @@ def main():
     train_sft_path = os.path.join(output_dir, "sft.jsonl")
     val_sft_path = os.path.join(output_dir, "validation.jsonl")
 
+    print(f"正在加载分词器: {TOKENIZER_PATH} ...")
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH, trust_remote_code=True)
+    except Exception as e:
+        print(f"分词器加载失败: {e}\n请确保已配置网络或替换为本地模型路径。")
+        return
+
     print("正在通过 HF-Mirror 加载 Bespoke-Stratos-17k 数据集...")
     dataset = load_dataset("HuggingFaceH4/Bespoke-Stratos-17k", split="train")
 
     all_data = []
 
-    # 建立统计字典
-    stats_dict = {"total_processed": 0}
+    # 建立统计字典，方便观察数据的死因
+    stats_dict = {"missing_qa": 0, "extract_answer_failed_on_gt": 0}
 
-    print("正在严格清洗并解析数据格式 (单进程+纯字符长度验证)...")
+    print("正在严格清洗并解析数据格式 (单进程模式)...")
     for item in tqdm(dataset, desc="Processing Data"):
-        rl_record, sft_record = format_bespoke_data(item, stats_dict)
+        rl_record, sft_record = format_bespoke_data(item, tokenizer, stats_dict)
         if rl_record and sft_record:
             all_data.append((rl_record, sft_record))
 
@@ -124,31 +131,14 @@ def main():
     val_data = all_data[:val_size]
     train_data = all_data[val_size:]
 
-    # ==========================================
-    # 📊 打印极其详细的统计报告
-    # ==========================================
-    total = stats_dict.get("total_processed", 1)
-    kept_clean = stats_dict.get("clean_passed", 0)
-    kept_fixed = stats_dict.get("fixed_and_passed", 0)
-    total_kept = kept_clean + kept_fixed
-
-    print("\n" + "=" * 50)
-    print("📊 数据清洗统计报告")
-    print("=" * 50)
-    print(f"原始数据总量: {total} 条")
-    print(f"最终保留数据: {total_kept} 条 (存活率: {total_kept / total:.2%})")
-
-    print("\n✅ 保留详情:")
-    print(f"  - 完美格式 (无需修复直接放行) : {kept_clean} 条")
-    print(f"  - 成功修复 (截断超长/清理换行) : {kept_fixed} 条")
-
-    print("\n❌ 过滤/丢弃原因分布:")
-    # 排除掉正常通过的 key，只打印拒绝的原因
-    reject_keys = {k: v for k, v in stats_dict.items() if
-                   k not in ["total_processed", "clean_passed", "fixed_and_passed"] and v > 0}
-    for k, v in sorted(reject_keys.items(), key=lambda x: x[1], reverse=True):
-        print(f"  - {k:<25}: {v} 条")
-    print("=" * 50 + "\n")
+    print("\n" + "=" * 40)
+    print("--- 过滤总结报告 ---")
+    print(f"原始数据总量: {len(dataset)} 条")
+    print(f"清洗后剩余量: {len(all_data)} 条 (存活率: {len(all_data) / len(dataset):.2%})")
+    print("\n具体处理状态分布：")
+    for k, v in sorted(stats_dict.items(), key=lambda x: x[1], reverse=True):
+        print(f"  {k}: {v}")
+    print("=" * 40 + "\n")
 
     print("正在写入文件...")
     with open(train_rl_path, "w", encoding="utf-8") as f_rl_train, \
@@ -163,7 +153,7 @@ def main():
             f_rl_val.write(json.dumps(rl_rec, ensure_ascii=False) + "\n")
             f_sft_val.write(json.dumps(sft_rec, ensure_ascii=False) + "\n")
 
-    print(f"✅ 生成完毕！所有结构纯净的数据保存在 {output_dir}/ 目录下。")
+    print(f"✅ 生成完毕！所有纯净数据保存在 {output_dir}/ 目录下。")
 
 
 if __name__ == "__main__":
