@@ -58,6 +58,9 @@ def format_bespoke_data(item: dict, tokenizer, stats_dict: dict) -> tuple:
     ground_truth = item.get("solution", "")
     if not ground_truth:
         ground_truth = item.get("answer", "")
+    if not ground_truth:
+        # 兜底：从原始回复里强行提取 \boxed
+        ground_truth = extract_answer(raw_response)
 
     if not ground_truth:
         stats_dict["missing_ground_truth"] =  stats_dict.get("missing_ground_truth",0)+1
@@ -95,7 +98,7 @@ def format_bespoke_data(item: dict, tokenizer, stats_dict: dict) -> tuple:
 
 
 def main():
-    output_dir = "train_data/datasets/Bespoke17k_Platinum"
+    output_dir = "train_data/datasets/Bespoke17k"
     os.makedirs(output_dir, exist_ok=True)
 
     train_rl_path = os.path.join(output_dir, "train.jsonl")
