@@ -309,11 +309,11 @@ def main():
                 #     tokenizer.save_pretrained(ckpt_dir)
 
                 # ==========================================
-                # (E) 验证与模型生成阶段 (4090 防 OOM 单卡原生推理)
+                # (E) 验证与模型生成阶段 (两阶段法：先集中生成，再独立算熵与日志)
                 # ==========================================
                 if epoch == epochs - 1 and (step_idx + 1) == len(train_loader):
                     
-                    progress_bar.write(f"\n[Step {global_step}] 准备启动 vLLM 验证，正在进行显存置换...")
+                    progress_bar.write(f"\n[Step {global_step}] 准备启动 vLLM 进行多数据集验证...")
                     
                     # 1. 保存当前实时权重到一个临时目录
                     temp_eval_dir = os.path.join(cfg["model"]["checkpoint_dir"], "temp_vllm_eval")
@@ -321,64 +321,60 @@ def main():
                     policy_model.save_pretrained(temp_eval_dir)
                     tokenizer.save_pretrained(temp_eval_dir)
 
-                    # 2. 释放训练模型显存 (将其移至 CPU 并清空 CUDA 缓存)
-                   if epoch == epochs - 1 and (step_idx + 1) == len(train_loader):
-                    
-                    progress_bar.write(f"\n[Step {global_step}] 准备按数据集分别启动 vLLM 验证...")
-                    
-                    # 1. 保存当前实时权重到一个临时目录 (整个验证阶段只需保存一次)
-                    temp_eval_dir = os.path.join(cfg["model"]["checkpoint_dir"], "temp_vllm_eval")
-                    os.makedirs(temp_eval_dir, exist_ok=True)
-                    policy_model.save_pretrained(temp_eval_dir)
-                    tokenizer.save_pretrained(temp_eval_dir)
+                    # ------------------------------------------
+                    # 阶段一：vLLM 集中生成
+                    # ------------------------------------------
+                    policy_model.to("cpu")
+                    torch.cuda.empty_cache()
+                    gc.collect()
 
-                    # 遍历每一个验证集，独立走完完整的验证流程
+                    llm = LLM(
+                        model=temp_eval_dir,
+                        trust_remote_code=True,
+                        tensor_parallel_size=1,
+                        gpu_memory_utilization=0.6 
+                    )
+                    sampling_params = SamplingParams(
+                        temperature=1.0,
+                        top_p=1.0,
+                        max_tokens=4096,
+                        stop=["</answer>"],
+                        include_stop_str_in_output=True
+                    )
+
+                    # 暂存所有数据集生成的文本
+                    all_generated_results = {}
+                    
                     for ds_name, val_data in val_datasets.items():
-                        progress_bar.write(f"\n>>> 正在独立评估验证集: {ds_name} <<<")
+                        progress_bar.write(f" >>> [vLLM 生成] 正在处理数据集: {ds_name}...")
+                        val_prompts = [item["prompt"] for item in val_data]
                         
-                        # 2. 释放训练模型显存
-                        policy_model.to("cpu")
-                        torch.cuda.empty_cache()
-                        gc.collect()
+                        outputs = llm.generate(val_prompts, sampling_params)
+                        generated_texts = [out.outputs[0].text for out in outputs]
+                        all_generated_results[ds_name] = generated_texts
 
-                        # 3. 初始化 vLLM
-                        llm = LLM(
-                            model=temp_eval_dir,
-                            trust_remote_code=True,
-                            tensor_parallel_size=1,
-                            gpu_memory_utilization=0.6 
-                        )
-                        sampling_params = SamplingParams(
-                            temperature=1.0,
-                            top_p=1.0,
-                            max_tokens=1024,
-                            stop=["</answer>"] 
-                        )
+                    # 集中销毁 vLLM，归还显存 (后续不再启动 vLLM)
+                    del llm
+                    destroy_model_parallel()
+                    torch.cuda.empty_cache()
+                    gc.collect()
 
+                    # ------------------------------------------
+                    # 阶段二：独立算熵与追加日志
+                    # ------------------------------------------
+                    progress_bar.write("vLLM 引擎已销毁，模型挂载回 GPU，开始独立算熵...")
+                    policy_model.to(device)
+                    policy_model.eval()
+                    tokenizer.padding_side = original_padding_side
+
+                    for ds_name, val_data in val_datasets.items():
+                        progress_bar.write(f"\n>>> [算熵与日志] 正在评估数据集: {ds_name} <<<")
+                        
                         val_prompts = [item["prompt"] for item in val_data]
                         val_truths = [item["ground_truth"] for item in val_data]
-
-                        # 4. vLLM 批量生成当前数据集
-                        outputs = llm.generate(val_prompts, sampling_params)
-                        generated_texts = [
-                            (out.outputs[0].text + "</answer>") if out.outputs[0].finish_reason == "stop" else out.outputs[0].text
-                            for out in outputs
-                        ]
-
-                        # 5. 销毁 vLLM，归还显存
-                        del llm
-                        destroy_model_parallel()
-                        torch.cuda.empty_cache()
-                        gc.collect()
-
-                        # 6. 把策略模型搬回 GPU，准备算熵
-                        policy_model.to(device)
-                        policy_model.eval()
-
-                        # 7. 算熵阶段
-                        tokenizer.padding_side = original_padding_side
-                        val_entropies = []
+                        generated_texts = all_generated_results[ds_name] # 取出刚才生成的文本
                         
+                        val_entropies = []
                         with torch.no_grad():
                             for vp, vg in zip(val_prompts, generated_texts):
                                 t_data = tokenize_prompt_and_output([vp], [vg], tokenizer)
@@ -391,8 +387,10 @@ def main():
                                 mask = t_data["response_mask"].to(device)
                                 val_entropies.append(out_dict["token_entropy"][mask == 1])
 
+                        # 打日志 (利用追加模式，统一写入同一个文件)
                         save_logs = cfg["training"].get("save_logs", "output/sft_logs.txt")
-
+                        yaml_config_name = f"{os.path.basename(args.exp_config).replace('.yaml', '')}_{ds_name}"
+                        
                         log_generations(
                             prompts=val_prompts,
                             generated_responses=generated_texts,
@@ -404,10 +402,10 @@ def main():
                             yaml_config_name=yaml_config_name
                         )
                         
-                        progress_bar.write(f"[{ds_name}] 评估完毕，日志已保存。")
+                        progress_bar.write(f"[{ds_name}] 评估完毕，已追加写入 {save_logs}。")
 
                     eval_step += 1
-                    progress_bar.write("\n[Evaluation] 所有验证集独立评估完毕，恢复训练环境...")
+                    progress_bar.write("\n[Evaluation] 所有验证集评估完毕，恢复训练环境...")
                     torch.cuda.empty_cache()
                     policy_model.train()
 

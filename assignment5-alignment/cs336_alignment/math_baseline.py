@@ -11,7 +11,8 @@ MODEL_REGISTRY = {
     "qwen_1.5b": "train_data/models/Qwen2.5-Math-1.5B",
     # 兼容图片和文档的 Llama 3.1 路径，请根据集群实际情况微调最后的文件夹名
     "llama_3.1_8b": "train_data/models/Llama-3.1", 
-    "llama_3.3_70b": "train_data/models/Llama-3.3-70B-Instruct"
+    "llama_3.3_70b": "train_data/models/Llama-3.3-70B-Instruct",
+    "qwen_2.5b": "checkpoints/qwen_sft_Bespoke17k_2048_checkpoints_false/temp_vllm_eval"
 }
 
 def evaluate_vllm(
@@ -77,7 +78,7 @@ def main():
                         type=str, required=True, 
                         choices=MODEL_REGISTRY.keys(), 
                         help="要评估的模型名称")
-    parser.add_argument("--dataset_type", type=str, default="GSM8K", choices=["Bespoke17k", "GSM8K"])
+    parser.add_argument("--dataset_type", type=str, default="GSM8K", choices=["Bespoke17k", "GSM8K","MATH-500"])
     args = parser.parse_args()
     model_path = MODEL_REGISTRY[args.model_name]
     output_dir = "train_data/output/math_baseline_results"

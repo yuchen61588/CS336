@@ -62,7 +62,8 @@ python cs336_alignment/run_all_yaml.py \
 
 #  Bespoke-Stratos-17k多测试集训练
 python cs336_alignment/run_all_yaml.py \
-  --run_script cs336_alignment/sft_run.py \ 
+  --run_script cs336_alignment/sft_run.py \
+  --base_config config/sft/sft_base_5test.yaml \
   --exp_pattern "config/sft/qwen_2.5B_5_test_Bespoke17k*_*.yaml"
 
 

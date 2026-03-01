@@ -14,7 +14,6 @@ data:
   - "train_data/datasets/GSM8K/validation.jsonl"
   - "train_data/datasets/MATH-500/validation.jsonl"
   - "train_data/datasets/OmniMATH/validation.jsonl"
-
   num_train_examples: 2048
   filter_correct_only: false       # 第一阶段不过滤，照单全收
   num_val_examples: 500            # 每次评估 200 条
