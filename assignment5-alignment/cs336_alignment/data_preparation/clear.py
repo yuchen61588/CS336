@@ -1,7 +1,7 @@
 
 import regex as re
 import re
-
+MAX_BOXED_LEN = 15
 
 MAX_ANSWER_LEN = 100
 def clean_and_repair_response(response: str, ground_truth: str) -> tuple[str, str]:
@@ -44,10 +44,23 @@ def clean_and_repair_response(response: str, ground_truth: str) -> tuple[str, st
 
     # 如果通过了准确性校验，但内容太长（比如带了解释文本），进行提取瘦身
     if len(answer_content) > MAX_ANSWER_LEN:
-        boxed_match = re.search(r"(\\boxed\{.*?\})", answer_content)
+        # 使用正则提取第一个出现的 \boxed{...}
+        # re.DOTALL 确保能匹配跨行的 boxed (如果有的话)
+        boxed_match = re.search(r"(\\boxed\{.*?\})", answer_content, re.DOTALL)
+        
         if boxed_match:
-            answer_content = boxed_match.group(1)
+            clean_boxed = boxed_match.group(1).strip()
+            
+            # [⭐ 新增逻辑]：校验提取出来的 boxed 内容本身是否过长
+            if len(clean_boxed) > MAX_BOXED_LEN:
+                return None, "boxed_content_too_long"
+            
+            # 抢救成功：将冗长的回答替换为纯净的 boxed
+            answer_content = clean_boxed
             is_fixed = True
+        else:
+            # 回答很长且找不到任何 \boxed
+            return None, "verbose_answer_no_boxed"
 
     # 如果答案区有换行符，清除非法换行
     if "\n" in answer_content.strip():

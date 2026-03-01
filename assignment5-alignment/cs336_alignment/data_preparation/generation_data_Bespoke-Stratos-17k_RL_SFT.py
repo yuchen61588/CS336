@@ -1,17 +1,18 @@
 import os
+os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+os.environ["HF_HUB_DISABLE_XET"] = "1"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 import re
 import json
 import random
 from tqdm import tqdm
 from datasets import load_dataset
-from transformers import AutoTokenizer
+from transformers.models.auto.tokenization_auto import AutoTokenizer
 
 # 从你的评估脚本中导入 grade 和 extract_answer
 from cs336_alignment.drgrpo_grader import grade, extract_answer
 from cs336_alignment.data_preparation.clear import clean_and_repair_response
-os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
-os.environ["HF_HUB_DISABLE_XET"] = "1"
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 
 # --- 配置区 ---
 MIN_LEN = 500

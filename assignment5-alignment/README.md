@@ -20,6 +20,7 @@ uv sync
 uv pip install --upgrade datasets fsspec huggingface_hub
 uv pip install -U datasets
 uv pip install --upgrade wandb
+uv pip install "huggingface_hub>=0.30.0,<1.0"
 
 export UV_INDEX_URL="https://pypi.tuna.tsinghua.edu.cn/simple"
 uv cache clean

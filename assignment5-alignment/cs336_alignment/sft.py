@@ -37,6 +37,9 @@ def tokenize_prompt_and_output(
         # }
         prompt_tokens = tokenizer(prompt,add_special_tokens=False)["input_ids"]
         output_tokens = tokenizer(output, add_special_tokens=False)["input_ids"]
+
+        if tokenizer.eos_token_id is not None:
+            output_tokens.append(tokenizer.eos_token_id)
         
         # 拼接 tokens
         combined_tokens = prompt_tokens + output_tokens

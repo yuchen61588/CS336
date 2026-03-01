@@ -12,4 +12,4 @@ data:
   filter_correct_only: false       # 第一阶段不过滤，照单全收
   num_val_examples: 200            # 每次评估 200 条
 wandb:
-  run_name: "qwen_sft_GSM8K_512_true"
+  run_name: "qwen_sft_GSM8K_1024_false"

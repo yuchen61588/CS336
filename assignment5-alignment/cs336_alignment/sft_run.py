@@ -323,9 +323,8 @@ def main():
                         model=temp_eval_dir,
                         trust_remote_code=True,
                         tensor_parallel_size=1,
-                        gpu_memory_utilization=0.4 # ⚠️ 如果报错 OOM，调低这个值(如 0.3)；如果提示 KV cache 空间不足，调高这个值(如 0.5)
+                        gpu_memory_utilization=0.6 # ⚠️ 如果报错 OOM，调低这个值(如 0.3)；如果提示 KV cache 空间不足，调高这个值(如 0.5)
                     )
-
                     # vLLM 直接支持 Stop Token，不需要事后切分字符串了
                     sampling_params = SamplingParams(
                         temperature=1.0,
