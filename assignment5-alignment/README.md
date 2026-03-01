@@ -49,15 +49,20 @@ python cs336_alignment/math_baseline.py --model_name qwen_1.5b --dataset_type Be
 # sft 数据集训练
 python cs336_alignment/data_preparation/generation_data_Bespoke-Stratos-17k_RL_SFT.py
 python cs336_alignment/sft_run.py --base_config config/sft/sft_base.yaml --exp_config config/sft/qwen_2.5B_bespoke_128_false.yaml
+# GSM8K堆叠训练
 python cs336_alignment/run_all_yaml.py \
   --run_script cs336_alignment/sft_run.py \
   --base_config config/sft/sft_base.yaml \
   --exp_pattern "config/sft/qwen_2.5B_GSM8K*_*.yaml"
-
+# Bespoke-Stratos-17k堆叠训练
 python cs336_alignment/run_all_yaml.py \
   --run_script cs336_alignment/sft_run.py \
   --base_config config/sft/sft_base.yaml \
   --exp_pattern "config/sft/qwen_2.5B_Bespoke17k*_*.yaml"
 
+#  Bespoke-Stratos-17k多测试集训练
+python cs336_alignment/run_all_yaml.py \
+  --run_script cs336_alignment/sft_run.py \ 
+  --exp_pattern "config/sft/qwen_2.5B_5_test_Bespoke17k*_*.yaml"
 
 
