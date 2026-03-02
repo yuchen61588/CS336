@@ -8,7 +8,7 @@ from torch import Tensor
 from torch.utils.data import Dataset
 from transformers import PreTrainedTokenizerBase
 from cs336_alignment.sft import tokenize_prompt_and_output,masked_normalize,compute_entropy,get_response_log_probs,sft_microbatch_train_step
-
+import torch.nn.functional as F
 
 def run_tokenize_prompt_and_output(
     prompt_strs: list[str],
@@ -80,7 +80,10 @@ def run_compute_group_normalized_rewards(
 
 def run_compute_entropy(logits: torch.Tensor) -> torch.Tensor:
     """Get the entropy of the logits (i.e., entropy of the final dimension)."""
-    return compute_entropy(logits)
+    logits_fp32 = logits.to(torch.float32)
+    all_log_probs = F.log_softmax(logits_fp32, dim=-1)
+    
+    return compute_entropy(all_log_probs)
     raise NotImplementedError
 
 
@@ -111,7 +114,8 @@ def run_get_response_log_probs(
             下个令牌预测的信息熵。与 log-probs 一样，此处尚未屏蔽掉提示词
             或填充位对应的令牌索引；该处理步骤将在训练循环中完成。
 """
-    return get_response_log_probs(model,input_ids,labels,return_token_entropy)
+    return get_response_log_probs(model, input_ids, labels, return_token_entropy=True)
+    
     raise NotImplementedError
 
 

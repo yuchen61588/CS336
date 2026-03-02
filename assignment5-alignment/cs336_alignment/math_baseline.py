@@ -107,8 +107,8 @@ def main():
     prompts = [item["prompt"] for item in dataset]
     #预设要求
     sampling_params = SamplingParams(
-        temperature=1.0,
-        top_p=1.0,
+        temperature=0.7,
+        top_p=0.95,
         max_tokens=4096,
         stop=["</answer>"],
         include_stop_str_in_output=True

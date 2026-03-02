@@ -38,8 +38,7 @@ def tokenize_prompt_and_output(
         prompt_tokens = tokenizer(prompt,add_special_tokens=False)["input_ids"]
         output_tokens = tokenizer(output, add_special_tokens=False)["input_ids"]
 
-        if tokenizer.eos_token_id is not None:
-            output_tokens.append(tokenizer.eos_token_id)
+       
         
         # 拼接 tokens
         combined_tokens = prompt_tokens + output_tokens
@@ -124,7 +123,6 @@ def get_response_log_probs(  model: PreTrainedModel, input_ids: torch.Tensor, la
             logits.view(-1, vocab_size), 
             labels.view(-1), 
             reduction='none',
-            ignore_index=-100  # 直接让 PyTorch 忽略 padding
         )
         # 变回 (B, L) 并取负号得到 log_prob
         selected_log_probs = -per_token_loss.view(batch_size, seq_len)
@@ -133,11 +131,13 @@ def get_response_log_probs(  model: PreTrainedModel, input_ids: torch.Tensor, la
     else:
         # ⚠️ 必须开启 Entropy 时：转 FP32 防溢出，且坚决只算一次 log_softmax
         logits_fp32 = logits.to(torch.float32)
-        all_log_probs = F.log_softmax(logits_fp32, dim=-1)
+        all_log_probs = F.log_softmax(logits, dim=-1)
         
+
+        labels_expanded = gather_labels.unsqueeze(-1)
         # 1. 提取目标 token 概率
         selected_log_probs = torch.gather(
-            all_log_probs, dim=-1, index=gather_labels.unsqueeze(-1)
+            all_log_probs, dim=-1, index=labels_expanded
         ).squeeze(-1)
         
         # 2. 复用 all_log_probs 计算熵，而不是重新传入 logits
