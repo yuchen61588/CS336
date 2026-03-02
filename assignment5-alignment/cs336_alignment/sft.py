@@ -214,7 +214,8 @@ def log_generations(
         reward_fn,
         step: int,
         save_logs: Optional[str] = None,
-        yaml_config_name: Optional[str] = None
+        yaml_config_name: Optional[str] = None,
+        tokenizer:PreTrainedTokenizer =None
 ):
     """
     一个日志辅助函数，用于将模型生成结果及分类统计记录到 wandb (或终端)。
@@ -266,7 +267,7 @@ def log_generations(
         avg_entropy = entropies.mean().item() if len(entropies) > 0 else 0.0
 
         # 3. 统计生成长度
-        resp_len = len(response)
+        resp_len = len(tokenizer.encode(response))
         all_lengths.append(resp_len)
         if r_total > 0:
             correct_lengths.append(resp_len)

@@ -401,7 +401,8 @@ def main():
                             reward_fn=r1_zero_reward_fn,
                             step=global_step,
                             save_logs=save_logs,
-                            yaml_config_name=yaml_config_name
+                            yaml_config_name=yaml_config_name,
+                            tokenizer=tokenizer
                         )
                         
                         progress_bar.write(f"[{ds_name}] 评估完毕，已追加写入 {save_logs}。")
