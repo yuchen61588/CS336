@@ -334,9 +334,11 @@ def main():
                         tensor_parallel_size=1,
                         gpu_memory_utilization=0.6 
                     )
+                    temp = cfg["training"].get("temperature", 0.7)
+                    top_p = cfg["training"].get("top_p", 0.95)
                     sampling_params = SamplingParams(
-                        temperature=1.0,
-                        top_p=1.0,
+                        temperature=temp,
+                        top_p=top_p,
                         max_tokens=4096,
                         stop=["</answer>"],
                         include_stop_str_in_output=True

@@ -10,7 +10,7 @@ def main():
     parser = argparse.ArgumentParser(description="🚀 通用多实验批量运行脚本")
     parser.add_argument("--run_script", type=str, required=True, 
                         help="要执行的主训练脚本路径 (例如: cs336_alignment/sft_run.py)")
-    parser.add_argument("--base_config", type=str, required=True, 
+    parser.add_argument("--base_config", type=str, required=False, default=None,
                         help="基础配置文件路径 (例如: config/sft/sft_base.yaml)")
     parser.add_argument("--exp_pattern", type=str, required=True, 
                         help="实验配置文件的通配符匹配规则 (例如: config/sft/qwen_2.5B_GSM8K*_*.yaml)")
@@ -30,7 +30,7 @@ def main():
         return
 
     # 校验：检查基础配置是否存在
-    if not os.path.exists(base_config):
+    if base_config and not os.path.exists(base_config):
         print(f"❌ 找不到基础配置文件: {base_config}")
         return
 
@@ -43,7 +43,10 @@ def main():
         
     print(f"🔍 模式匹配成功，共发现 {len(exp_configs)} 个实验配置待运行。")
     print(f"📜 执行脚本: {run_script}")
-    print(f"⚙️ 基础配置: {base_config}")
+    if base_config:
+        print(f"⚙️ 运行模式: 双配置模式 非Baseline | 基础配置: {base_config}")
+    else:
+        print(f"⚙️ 运行模式: 单配置模式 (Baseline)")
     print("=" * 50)
     
     # ===============================
@@ -51,13 +54,14 @@ def main():
     # ===============================
     for i, exp_config in enumerate(exp_configs, 1):
         print(f"\n🚀 [ {i} / {len(exp_configs)} ] 正在启动实验: {exp_config}")
-        
+        cmd = ["python", run_script]
         # 动态组装命令
-        cmd = [
-            "python", run_script, 
-            "--base_config", base_config, 
-            "--exp_config", exp_config
-        ]
+        if base_config:
+            # SFT 模式：传入 base_config 和 exp_config
+            cmd.extend(["--base_config", base_config, "--exp_config", exp_config])
+        else:
+            # Baseline 模式：只传入 config
+            cmd.extend(["--config", exp_config])
         
         try:
             subprocess.run(cmd, check=True)

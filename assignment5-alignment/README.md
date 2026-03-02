@@ -43,21 +43,21 @@ source .venv/bin/activate
 /bin/vim ~/.bashrc
 vim ~/.bashrc
 
-# baseline命令
-python cs336_alignment/math_baseline.py --model_name qwen_1.5b --dataset_type GSM8K
-python cs336_alignment/math_baseline.py --model_name qwen_1.5b --dataset_type Bespoke17k
-# sft 数据集训练
-python cs336_alignment/data_preparation/generation_data_Bespoke-Stratos-17k_RL_SFT.py
-python cs336_alignment/sft_run.py --base_config config/sft/sft_base.yaml --exp_config config/sft/qwen_2.5B_bespoke_128_false.yaml
+# baseline训练
+python cs336_alignment/run_all_yaml.py \
+  --run_script cs336_alignment/math_baseline.py \
+  --exp_pattern "config/baseline/eval*_*.yaml"
+
+# sft 训练
 # GSM8K堆叠训练
 python cs336_alignment/run_all_yaml.py \
   --run_script cs336_alignment/sft_run.py \
-  --base_config config/sft/sft_base.yaml \
+  --base_config config/sft/sft_base_GSM8K.yaml \
   --exp_pattern "config/sft/qwen_2.5B_GSM8K*_*.yaml"
 # Bespoke-Stratos-17k堆叠训练
 python cs336_alignment/run_all_yaml.py \
   --run_script cs336_alignment/sft_run.py \
-  --base_config config/sft/sft_base.yaml \
+  --base_config config/sft/sft_base_Bespoke17k.yaml \
   --exp_pattern "config/sft/qwen_2.5B_Bespoke17k*_*.yaml"
 
 #  Bespoke-Stratos-17k多测试集训练
