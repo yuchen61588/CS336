@@ -52,18 +52,19 @@ python cs336_alignment/run_all_yaml.py \
 # GSM8K堆叠训练
 python cs336_alignment/run_all_yaml.py \
   --run_script cs336_alignment/sft_run.py \
-  --base_config config/sft/sft_base_GSM8K.yaml \
-  --exp_pattern "config/sft/qwen_2.5B_GSM8K*_*.yaml"
+  --base_config config/sft/train/sft_base_GSM8K.yaml \
+  --exp_pattern "config/sft/eval/qwen_2.5B_GSM8K*_*.yaml"
+
 # Bespoke-Stratos-17k堆叠训练
 python cs336_alignment/run_all_yaml.py \
   --run_script cs336_alignment/sft_run.py \
-  --base_config config/sft/sft_base_Bespoke17k.yaml \
-  --exp_pattern "config/sft/qwen_2.5B_Bespoke17k*_*.yaml"
+  --base_config config/sft/train/sft_base_Bespoke17k.yaml \
+  --exp_pattern "config/sft/eval/qwen_2.5B_Bespoke17k*_*.yaml"
 
 #  Bespoke-Stratos-17k多测试集训练
 python cs336_alignment/run_all_yaml.py \
   --run_script cs336_alignment/sft_run.py \
-  --base_config config/sft/sft_base_5test.yaml \
-  --exp_pattern "config/sft/qwen_2.5B_5_test_Bespoke17k*_*.yaml"
+  --base_config config/sft/train/sft_base_5test.yaml \
+  --exp_pattern "config/sft/eval/qwen_2.5B_5_test_Bespoke17k*_*.yaml"
 
 

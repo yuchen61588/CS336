@@ -8,6 +8,7 @@ from torch import Tensor
 from torch.utils.data import Dataset
 from transformers import PreTrainedTokenizerBase
 from cs336_alignment.sft import tokenize_prompt_and_output,masked_normalize,compute_entropy,get_response_log_probs,sft_microbatch_train_step
+from cs336_alignment.grpo_Dr import compute_grpo_clip_loss,compute_policy_gradient_loss,grpo_microbatch_train_step,compute_group_normalized_rewards,masked_mean,compute_naive_policy_gradient_loss
 import torch.nn.functional as F
 
 def run_tokenize_prompt_and_output(
@@ -75,6 +76,7 @@ def run_compute_group_normalized_rewards(
         dict[str, float]: 采样批次（rollout batch）奖励值的元数据。
             你可以选择在此记录任何统计信息（如奖励值的均值、方差等）。
 """
+    return compute_group_normalized_rewards(reward_fn,rollout_responses,repeated_ground_truths,group_size,advantage_eps,normalize_by_std)
     raise NotImplementedError
 
 
@@ -135,6 +137,7 @@ def run_compute_naive_policy_gradient_loss(
         torch.Tensor of shape (batch_size, sequence_length): 
             the policy gradient per-token loss.
     """
+    return run_compute_group_normalized_rewards(raw_rewards_or_advantages,policy_log_probs)
     raise NotImplementedError
 
 
@@ -162,6 +165,7 @@ def run_compute_grpo_clip_loss(
             dict[str, torch.Tensor]: metadata for the GRPO-Clip loss 
                 (used to compute clip fraction).
     """
+    return compute_grpo_clip_loss(advantages,policy_log_probs,old_log_probs,cliprange)
     raise NotImplementedError
 
 
@@ -176,7 +180,9 @@ def run_compute_policy_gradient_loss(
     """
     Wrapper that delegates to the appropriate policy gradient loss function above.
     """
+    return compute_policy_gradient_loss(policy_log_probs,loss_type,raw_rewards,advantages,old_log_probs,cliprange)
     raise NotImplementedError
+
 
 
 def run_masked_mean(tensor: torch.Tensor, mask: torch.Tensor, dim: int | None = None) -> torch.Tensor:
@@ -195,7 +201,7 @@ def run_masked_mean(tensor: torch.Tensor, mask: torch.Tensor, dim: int | None = 
     torch.Tensor，在指定维度上仅考虑掩码值为 1
         的元素所得到的张量均值。
 """
-
+    return masked_mean(tensor,mask,dim)
     raise NotImplementedError
 
 def run_sft_microbatch_train_step(
@@ -246,6 +252,7 @@ def run_grpo_microbatch_train_step(
         tuple[torch.Tensor, dict[str, torch.Tensor]]: 
             the policy gradient loss and its metadata.
     """
+    return grpo_microbatch_train_step(policy_log_probs,response_mask,gradient_accumulation_steps,loss_type,raw_rewards,advantages,old_log_probs,cliprange,)
 
     raise NotImplementedError
 

@@ -22,11 +22,11 @@ from vllm.distributed.parallel_state import destroy_model_parallel
 # 导入你的辅助模块 (请确保这些文件在同级目录)
 # ==========================================
 from cs336_alignment.sft import (
-    tokenize_prompt_and_output,
-    get_response_log_probs,
+
     sft_microbatch_train_step,
     log_generations
 )
+from cs336_alignment.utils import tokenize_prompt_and_output,get_response_log_probs
 from drgrpo_grader import r1_zero_reward_fn
 
 
