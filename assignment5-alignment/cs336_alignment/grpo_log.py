@@ -8,16 +8,16 @@ import os
 
 
 
-def log_train_metrics(step, reward_mean, loss, grad_norm, lr, token_entropy):
+def log_train_metrics(step:int , metrics: Dict):
     """阶段 1：训练过程中的极简画图统计"""
-    wandb.log({
-        "train_step": step,
-        "train/reward_mean": reward_mean,  # 核心指标
-        "train/entropy": token_entropy,  # 核心指标
-        "train/loss": loss,  # 仅供调试防飞
-        "train/grad_norm": grad_norm,
-        "train/lr": lr,
-    })
+    log_data = {"train_step": step}
+    log_data.update(metrics)
+
+    wandb.log(log_data)
+
+
+
+
 
 
 def log_periodic_eval_metrics(step, llm, valid_data, prompt_template, sampling_params):

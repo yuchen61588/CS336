@@ -1,4 +1,4 @@
-# configs/grpo_base.yaml
+# configs/grpo_base_online(REINFORCE).yaml
 model:
   model_path: "train_data/models/Qwen2.5-Math-1.5B"
   dtype: "bfloat16"
@@ -24,7 +24,7 @@ training:
 
   rollout_batch_size: 64
   group_size: 8
-  micro_batch_size: 1
+  micro_batch_size: 3
   epochs_per_rollout_batch: 1
   loss_type: "grpo_clip"
   clip_range: 0.2
