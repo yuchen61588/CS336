@@ -29,8 +29,8 @@ training:
   loss_type: "grpo_clip"
   clip_range: 0.2
 
-  normalize_by_std: True
-  remove_length_norm: False
+  normalize_by_std: False
+  remove_length_norm: True
   fixed_norm_length: null
   length_panelty: True
 
@@ -56,6 +56,6 @@ evaluation:
   save_logs: "output_log/grpo_final_eval_logs.txt"
 
 wandb:
-  project: "CS336-Assignment5-Alignment——GRPO"
-  run_name: "grpo_base_training"
+  project: "CS336-Assignment5-Alignment——GRPO_no_std"
+  run_name: "grpo_no_std_base_training"
   entity: null

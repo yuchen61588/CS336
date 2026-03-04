@@ -232,10 +232,10 @@ def masked_mean( tensor: torch.Tensor, mask: torch.Tensor, dim: int | None = Non
         """
     masked_tensor = tensor * mask
     if dim is None:
-        return masked_tensor.sum() / torch.clamp(mask.sum(), min=1e-8)
+        return masked_tensor.sum() / torch.clamp(mask.sum(), min=0)
     else:
         # 对指定维度求均值，例如 dim=1 对每个序列求平均
-        return masked_tensor.sum(dim=dim) / torch.clamp(mask.sum(dim=dim), min=1e-8)
+        return masked_tensor.sum(dim=dim) / torch.clamp(mask.sum(dim=dim), min=0)
 
 # GRPO 微批次训练步
 def grpo_microbatch_train_step(
