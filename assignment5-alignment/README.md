@@ -22,6 +22,8 @@ uv pip install -U datasets
 uv pip install --upgrade wandb
 uv pip install "huggingface_hub>=0.30.0,<1.0"
 
+tmux new -s grpo_run
+
 export UV_INDEX_URL="https://pypi.tuna.tsinghua.edu.cn/simple"
 uv cache clean
 实在不行把venv删了
@@ -67,4 +69,23 @@ python cs336_alignment/run_all_yaml.py \
   --base_config config/sft/train/sft_base_5test.yaml \
   --exp_pattern "config/sft/eval/qwen_2.5B_5_test_Bespoke17k*_*.yaml"
 
+
+# grpo_base_online 训练
+
+python cs336_alignment/run_all_yaml.py \
+  --run_script cs336_alignment/grpo_run.py \
+  --base_config config/grpo/train/grpo_base_online\(REINFORCE\).yaml \
+  --exp_pattern "config/grpo/eval/eval*_*.yaml"
+python cs336_alignment/run_all_yaml.py \
+  --run_script cs336_alignment/grpo_run.py \
+  --base_config config/grpo/train/grpo_base_offline.yaml \
+  --exp_pattern "config/grpo/eval/eval*_*.yaml"
+python cs336_alignment/run_all_yaml.py \
+  --run_script cs336_alignment/grpo_run.py \
+  --base_config config/grpo/train/grpo_base_no_std.yaml \
+  --exp_pattern "config/grpo/eval/eval*_*.yaml"
+python cs336_alignment/run_all_yaml.py \
+  --run_script cs336_alignment/grpo_run.py \
+  --base_config config/grpo/train/Dr_grpo.yaml \
+  --exp_pattern "config/grpo/eval/eval*_*.yaml"
 

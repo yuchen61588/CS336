@@ -116,7 +116,7 @@ def get_response_log_probs(model: PreTrainedModel, input_ids: torch.Tensor, labe
     else:
         # ⚠️ 必须开启 Entropy 时：转 FP32 防溢出，且坚决只算一次 log_softmax
         logits_fp32 = logits.to(torch.float32)
-        all_log_probs = F.log_softmax(logits, dim=-1)
+        all_log_probs = F.log_softmax(logits_fp32, dim=-1)
 
         labels_expanded = gather_labels.unsqueeze(-1)
         # 1. 提取目标 token 概率

@@ -9,8 +9,11 @@ import random
 import argparse
 
 import collections.abc
+import collections.abc
+from tqdm import tqdm  # 🌟 新增：导入进度条神器
 
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers.models.auto.modeling_auto import AutoModelForCausalLM
+from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.optimization import get_cosine_schedule_with_warmup
 from vllm import LLM, SamplingParams
 
@@ -53,9 +56,11 @@ def load_and_filter_data(data_path, max_samples=None):
 
 # 权重迁移
 def load_policy_into_vllm_instance(policy: torch.nn.Module, llm: LLM):
-    state_dict = policy.state_dict()
+    torch.cuda.synchronize() # 🌟 确保 PyTorch 的更新已经全部落地
+    state_dict = {k: v.cuda() for k, v in policy.state_dict().items()} # 确保都在 GPU 上
     llm_model = llm.llm_engine.model_executor.driver_worker.model_runner.model
     llm_model.load_weights(state_dict.items())
+    torch.cuda.synchronize() # 🌟 确保 vLLM 加载完毕再进行下一步
 
 
 # ==========================================
@@ -104,13 +109,20 @@ def main():
     loss_type = cfg["training"]["loss_type"]
     # 是否跳过训练部分
     skip_training = os.path.exists(final_model_dir)
+    latest_ckpt_dir = os.path.join(checkpoint_dir, "latest")
 
     if skip_training:
         print(f"\n✅ 检测到已训练完成的模型: {final_model_dir}，将跳过训练直接评估！\n")
         active_model_path = final_model_dir 
+        start_step = n_grpo_steps  # 直接跳到评估阶段
     else:
-        print(f"\n🚀 未检测到最终模型，将从 {base_model_path} 开始训练...")
-        active_model_path = base_model_path
+       # 🌟 新增自动恢复逻辑：如果存在 latest 文件夹，直接从这里起步
+        if os.path.exists(latest_ckpt_dir):
+            print(f"\n🔄 检测到历史断点，将从 {latest_ckpt_dir} 恢复训练...")
+            active_model_path = latest_ckpt_dir
+        else:
+            print(f"\n🚀 未检测到断点，将从 {base_model_path} 开始全新训练...")
+            active_model_path = base_model_path
     
 
     prompt_template = "{question}"
@@ -167,13 +179,21 @@ def main():
         scheduler = get_cosine_schedule_with_warmup(optimizer,
                                                 num_warmup_steps=int(n_grpo_steps * cfg["training"]["warmup_ratio"]),
                                                 num_training_steps=n_grpo_steps)
-
+        start_step = cfg["model"].get("start_step", 0)
+        state_path = os.path.join(active_model_path, "training_state.pt")
+        if os.path.exists(state_path):
+            print("📦 正在恢复优化器与调度器状态...")
+            state = torch.load(state_path, map_location="cpu")
+            optimizer.load_state_dict(state['optimizer_state_dict'])
+            scheduler.load_state_dict(state['scheduler_state_dict'])
+            start_step = state['step'] + 1  # 从中断的下一步开始跑
+            print(f"✅ 成功无缝接力！将从 Step {start_step} 继续训练。")
         # ==========================================
         # 开始训练
         # ==========================================
         policy_model.train()
 
-        for step in range(cfg["model"]["start_step"], n_grpo_steps):
+        for step in range(start_step, n_grpo_steps):
             #导入最新权重
             load_policy_into_vllm_instance(policy_model, llm)
             # 抽取数据集
@@ -183,7 +203,7 @@ def main():
                 for item in batch_samples
             ]
             ground_truths = [item.get("ground_truth", item.get("answer", "")) for item in batch_samples]
-
+            print(f"DEBUG: 正在发送 {len(prompts)} 个问题给 vLLM...")
             outputs = llm.generate(prompts, train_sampling_params)
             #
             rollout_prompts, rollout_responses, repeated_ground_truths = [], [], []
@@ -193,6 +213,7 @@ def main():
                     rollout_responses.append(gen.text)
                     repeated_ground_truths.append(ground_truths[i])
             # 计算基线
+            print(f"--- 采样完成：共收集到 {len(rollout_responses)} 个回答，准备开始训练 ---")
             advantages, raw_rewards, adv_metadata = compute_group_normalized_rewards(
                 reward_fn=r1_zero_reward_fn,
                 rollout_responses=rollout_responses,
@@ -214,10 +235,26 @@ def main():
 
             with torch.no_grad():
                 policy_model.eval()
-                # 提取真实对数概率
-                old_log_probs_dict = get_response_log_probs(policy_model, input_ids, labels, return_token_entropy=True)
-                old_log_probs = old_log_probs_dict["log_probs"]
-                token_entropy = old_log_probs_dict.get("token_entropy", torch.tensor(0.0))
+                old_log_probs_list = []
+                token_entropy_list = []
+                
+                # 🌟 修复：复用 micro_batch_size，把获取 old_log_probs 也切成小碎块！
+                for i in tqdm(range(0, rollout_batch_size, micro_batch_size), desc="Extracting Old Log Probs", leave=False):
+                    mb_input_ids = input_ids[i:i + micro_batch_size]
+                    mb_labels = labels[i:i + micro_batch_size]
+                    
+                    mb_dict = get_response_log_probs(policy_model, mb_input_ids, mb_labels, return_token_entropy=False)
+                    old_log_probs_list.append(mb_dict["log_probs"])
+                    if "token_entropy" in mb_dict:
+                        token_entropy_list.append(mb_dict["token_entropy"])
+                
+                # 拼装回完整的 (rollout_batch_size, seq_len) 矩阵
+                old_log_probs = torch.cat(old_log_probs_list, dim=0)
+                if token_entropy_list:
+                    token_entropy = torch.cat(token_entropy_list, dim=0)
+                else:
+                    token_entropy = torch.tensor(0.0)
+                    
             policy_model.train()
 
             avg_entropy = token_entropy.mean().item() if isinstance(token_entropy, torch.Tensor) else 0.0
@@ -236,7 +273,7 @@ def main():
                 indices = list(range(rollout_batch_size))
                 random.shuffle(indices)
                 # 微批次
-                for i in range(0, rollout_batch_size, micro_batch_size):
+                for i in tqdm(range(0, rollout_batch_size, micro_batch_size), desc=f"Epoch {epoch+1}/{epochs_per_rollout_batch} Optimization", leave=False):
                     mb_indices = indices[i:i + micro_batch_size]
                     mb_input_ids, mb_labels, mb_mask = input_ids[mb_indices], labels[mb_indices], response_mask[mb_indices]
                     mb_advantages, mb_old_log_probs = advantages[mb_indices].cuda(), old_log_probs[mb_indices]
@@ -295,7 +332,9 @@ def main():
             print(f"Train Step {step}/{n_grpo_steps} | Train Reward: {adv_metadata['reward_mean']:.3f}")
 
             # 【画图】定期进行验证集评估（只看重Reward均值）
-            if (step + 1) % cfg["evaluation"]["eval_every_steps"] == 0 and (step + 1) != n_grpo_steps:
+            eval_every = cfg.get("validation", cfg.get("evaluation", {})).get("eval_every_steps", 50)
+        
+            if (step + 1) % eval_every == 0 and (step + 1) != n_grpo_steps:
                 # 权重迁移
                 load_policy_into_vllm_instance(policy_model, llm)
                 
@@ -305,10 +344,20 @@ def main():
 
                 log_periodic_eval_metrics(step, llm, val_prompts_periodic, val_truths_periodic, eval_sampling_params)
 
-                ckpt_dir = os.path.join(checkpoint_dir, f"step_{step + 1}")
-                os.makedirs(ckpt_dir, exist_ok=True)
-                policy_model.save_pretrained(ckpt_dir)
-                tokenizer.save_pretrained(ckpt_dir)
+                os.makedirs(latest_ckpt_dir, exist_ok=True)
+                
+                # 1. 保存模型和 Tokenizer
+                policy_model.save_pretrained(latest_ckpt_dir)
+                tokenizer.save_pretrained(latest_ckpt_dir)
+                
+                # 2. 保存优化器进度
+                torch.save({
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'scheduler_state_dict': scheduler.state_dict(),
+                    'step': step,
+                }, os.path.join(latest_ckpt_dir, "training_state.pt"))
+                
+                print(f"💾 进度已安全覆盖保存至 {latest_ckpt_dir} (当前 Step: {step})")
 
     # ==========================================
     # 终极评估 (训练彻底结束后触发)
@@ -330,7 +379,7 @@ def main():
     token_entropies_list = []
     policy_model.eval()
     with torch.no_grad():
-        for vp, vg in zip(val_prompts_raw, generated_texts):
+        for vp, vg in tqdm(zip(val_prompts_raw, generated_texts), total=len(val_prompts_raw), desc="Calculating Final Eval Entropy"):
             t_data = tokenize_prompt_and_output([vp], [vg], tokenizer, max_seq_length=cfg["data"]["max_seq_length"])
             out_dict = get_response_log_probs(
                 policy_model,
@@ -340,7 +389,6 @@ def main():
             )
             mask = t_data["response_mask"].cuda()
             token_entropies_list.append(out_dict["token_entropy"][mask == 1])
-
     # 调用你的详尽打印写入函数
     save_logs_path = cfg["evaluation"].get("save_logs", "output/grpo_final_eval_logs.txt")
     log_generations(

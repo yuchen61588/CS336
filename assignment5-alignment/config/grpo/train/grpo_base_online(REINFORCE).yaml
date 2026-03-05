@@ -49,7 +49,8 @@ training:
 validation:
   valid_path: "train_data/datasets/Bespoke17k/validation_rl.jsonl"
   max_samples: 100            
-  eval_every_steps: 50       
+  eval_every_steps: 20
+
 
 
 evaluation:
